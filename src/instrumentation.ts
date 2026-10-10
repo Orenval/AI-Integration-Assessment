@@ -33,6 +33,34 @@ export async function register(): Promise<void> {
     if (globalForSweeper.resetTokenSweeperStarted) return;
     globalForSweeper.resetTokenSweeperStarted = true;
 
+    // Startup recovery for background AI jobs (Phase 8)
+    try {
+      const { prisma } = await import("@/lib/prisma");
+      const { enqueueJob } = await import("@/lib/jobs/queue");
+
+      // 1. Reset any interrupted "processing" jobs back to "pending"
+      const resetResult = await prisma.job.updateMany({
+        where: { status: "processing" },
+        data: { status: "pending" },
+      });
+
+      // 2. Find all pending jobs to re-enqueue into memory queue
+      const pendingJobs = await prisma.job.findMany({
+        where: { status: "pending" },
+        select: { id: true },
+      });
+
+      for (const job of pendingJobs) {
+        enqueueJob(job.id);
+      }
+
+      console.log(
+        `[job-recovery] recovered ${pendingJobs.length} job(s) (${resetResult.count} reset from processing)`
+      );
+    } catch (err) {
+      console.error("[job-recovery] Failed to recover pending/interrupted jobs on startup:", err);
+    }
+
     const timer = setInterval(async () => {
         try {
             const deleted = await cleanupExpiredResetTokens();
