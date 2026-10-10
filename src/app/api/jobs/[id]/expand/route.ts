@@ -135,6 +135,7 @@ export async function POST(
     });
   } catch (error) {
     console.error(`[expand] Error expanding job ${id}:`, error);
+    await recordFailedAttempt(auth.session.userId, 'expand');
 
     if (error instanceof ProviderTimeoutError) {
       return NextResponse.json(
