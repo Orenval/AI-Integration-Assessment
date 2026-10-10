@@ -14,7 +14,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PROTECTED_ROUTES = ["/dashboard", "/verify-email"];
+const PROTECTED_ROUTES = ["/dashboard", "/verify-email", "/upload", "/jobs"];
 
 export function proxy(request: NextRequest): NextResponse {
     const { pathname } = request.nextUrl;
