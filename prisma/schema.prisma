@@ -1,0 +1,176 @@
+// =============================================================================
+// Prisma Schema — Auth Assessment
+// =============================================================================
+// This schema defines the complete data model for the authentication system.
+// All security-critical fields are documented inline.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// User — core identity record
+// -----------------------------------------------------------------------------
+model User {
+  id           String   @id @default(cuid())
+  fullName     String
+  // Requirement 13: Unique constraint at the database level prevents race-
+  // condition duplicate accounts. Application code also handles the conflict
+  // gracefully (Requirement 14: idempotency).
+  email        String   @unique
+  // bcrypt hash with embedded salt (cost factor 10). The raw password is never
+  // stored, logged, or transmitted after hashing. See src/lib/password.ts for
+  // the cost-factor rationale.
+  passwordHash String
+  emailVerified Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions            Session[]
+  verificationCodes   VerificationCode[]
+  passwordResetTokens PasswordResetToken[]
+  jobs                Job[]
+}
+
+// -----------------------------------------------------------------------------
+// Session — server-side session record
+// Requirement 3: Both idle timeout (lastActivityAt) and absolute timeout
+// (expiresAt) are enforced. See src/lib/session.ts → validateSession().
+// Requirement 9: Only IDs, hashes, and timestamps are stored — no full user
+// objects or sensitive data.
+// -----------------------------------------------------------------------------
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // We store sha256(rawToken) so that a database leak does not expose valid
+  // session tokens. The raw token lives only in the client cookie.
+  sessionTokenHash String    @unique
+  createdAt        DateTime  @default(now())
+  // Touched on every authenticated request — used to compute the idle window.
+  lastActivityAt   DateTime  @default(now())
+  // Fixed ceiling: 24 hours from session creation.
+  expiresAt        DateTime
+  // Set on sign-out (Requirement 8). A non-null value means the session is
+  // dead regardless of the timeout windows.
+  invalidatedAt    DateTime?
+
+  @@index([userId])
+}
+
+// -----------------------------------------------------------------------------
+// VerificationCode — email verification (6-digit, hashed)
+// Requirement 11: expiresAt is checked server-side, not just via UI countdown.
+// Requirement 6: resendCooldownUntil is the server-enforced gate.
+// -----------------------------------------------------------------------------
+model VerificationCode {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // sha256 of the 6-digit code derived from crypto.randomBytes(32).
+  // The raw code is never persisted. See src/lib/verification.ts.
+  codeHash            String
+  // Database-enforced expiry — the UI countdown is cosmetic only.
+  expiresAt           DateTime
+  // Deprecated soft-mark: records are now DELETED once the email is verified
+  // or superseded by a resend; this column is retained for schema stability
+  // and only ever read as `null` to filter for pending codes.
+  consumedAt          DateTime?
+  // Server-side resend gate: requests before this timestamp are rejected with
+  // 429 + Retry-After, regardless of any client-side disabled state.
+  resendCooldownUntil DateTime
+  // Incremented on wrong-code submission; used for lockout (e.g. 5 attempts).
+  attemptCount        Int       @default(0)
+  createdAt           DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// -----------------------------------------------------------------------------
+// PasswordResetToken — single-use, time-limited password reset CODE
+// Requirement 12: The reset credential is now a 6-digit numeric code (matching
+// the email-verification pattern) instead of a token embedded in a clicked URL.
+// Only the SHA-256 hash of the code is stored; the raw code is never persisted.
+// Single-use is enforced by DELETING the row on successful use; expiry via
+// expiresAt; a 60s resend
+// cooldown via resendCooldownUntil (server-enforced); and a max-attempt
+// lockout via attemptCount — identical to VerificationCode.
+// -----------------------------------------------------------------------------
+model PasswordResetToken {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // sha256 of the 6-digit code derived from crypto.randomBytes(32).
+  // Deliberately NOT unique: two users can coincidentally draw the same 6-digit
+  // number; the hash is scoped to the user via the (userId) index below.
+  codeHash            String
+  // Database-enforced expiry — reset codes expire after 1 hour.
+  expiresAt           DateTime
+  // DEPRECATED soft-mark: rows are now DELETED once the code is consumed
+  // (reset-password) or superseded/expired (forgot-password). This column is
+  // retained for schema stability and only ever holds a value on legacy rows.
+  usedAt              DateTime?
+  // Server-side resend gate: a new code request before this timestamp is
+  // silently skipped (cooldown enforced, response stays identical).
+  resendCooldownUntil DateTime
+  // Incremented on wrong-code submission; locks the code out at MAX attempts.
+  attemptCount        Int       @default(0)
+  createdAt           DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// -----------------------------------------------------------------------------
+// Job — asynchronous AI processing unit of work
+// Assessment 3: Tracks product photo extraction and expansion jobs
+// -----------------------------------------------------------------------------
+model Job {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status           String    // "pending" | "processing" | "done" | "failed"
+  attempts         Int       @default(0)
+  errorMessage     String?
+
+  storageKey       String    // R2 object key — never the file itself
+  originalFileName String
+  fileSize         Int
+  mimeType         String
+
+  rawModelOutput   Json?     // Gemini's raw response, retained for evidence/debugging
+  result           Json?     // validated, schema-conformant structured extraction
+  expandedResult   String?   // longer listing description from the follow-up "Expand" action
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// RateLimitAttempt — per-identifier, per-route, exponential backoff
+// Applied to signin, signup, forgot-password, resend-code, upload, expand.
+// -----------------------------------------------------------------------------
+model RateLimitAttempt {
+  id           String    @id @default(cuid())
+  // Scoped identifier: email address or IP, depending on the route.
+  identifier   String
+  // Route key: "signin", "signup", "forgot-password", "resend", "upload", "expand".
+  route        String
+  attemptCount Int       @default(1)
+  // Null = not locked. Non-null = locked until this timestamp.
+  // Backoff curve: 2^(attemptCount - 1) minutes, capped at 60 minutes.
+  lockedUntil  DateTime?
+  windowStart  DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Ensures one record per (identifier, route) pair so upserts are atomic.
+  @@unique([identifier, route])
+}
+
