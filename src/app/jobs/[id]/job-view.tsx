@@ -113,14 +113,14 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
           <Link
             href="/upload"
             style={{
-              color: '#3b82f6',
-              textDecoration: 'none',
-              fontWeight: 500,
-              outline: 'none',
-            }}
-          >
-            ← Back to Uploads
-          </Link>
+               color: '#2563eb',
+               textDecoration: 'none',
+               fontWeight: 500,
+               outline: 'none',
+             }}
+           >
+             ← Back to Uploads
+           </Link>
         </div>
 
         {isLoading ? (
@@ -267,9 +267,9 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                     style={{
                       display: 'inline-block',
                       padding: '4px 10px',
-                      backgroundColor: '#dcfce7',
-                      color: '#15803d',
-                      borderRadius: '9999px',
+                       backgroundColor: '#dcfce7',
+                       color: '#166534',
+                       borderRadius: '9999px',
                       fontSize: '12px',
                       fontWeight: 600,
                       textTransform: 'uppercase',
@@ -334,7 +334,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                       </span>
                     ))
                   ) : (
-                    <span style={{ fontSize: '14px', color: '#94a3b8' }}>No tags available</span>
+                     <span style={{ fontSize: '14px', color: '#475569' }}>No tags available</span>
                   )}
                 </div>
               </div>

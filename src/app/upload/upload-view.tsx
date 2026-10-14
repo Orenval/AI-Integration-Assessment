@@ -7,6 +7,11 @@ import { UPLOAD_LIMITS } from '@/lib/ai/config';
 import { JobDto } from '@/lib/ai/types';
 import { ensureCsrfToken } from '@/lib/api-client';
 
+function formatFileCount(count: number): string {
+  if (count === 0) return 'No files selected';
+  return count === 1 ? '1 file selected' : `${count} files selected`;
+}
+
 interface UploadViewProps {
   user: {
     fullName: string;
@@ -23,6 +28,7 @@ export function UploadView({ user }: UploadViewProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [clientErrors, setClientErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [rejectedList, setRejectedList] = useState<RejectedFile[]>([]);
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(true);
@@ -94,21 +100,10 @@ export function UploadView({ user }: UploadViewProps) {
     return () => clearInterval(intervalId);
   }, [hasActiveJobs, fetchJobs]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    setClientErrors([]);
-    setRejectedList([]);
+  const fileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 
-    if (files.length === 0) {
-      setSelectedFiles([]);
-      return;
-    }
-
+  const validateFiles = (files: File[]): string[] => {
     const errors: string[] = [];
-
-    if (files.length > UPLOAD_LIMITS.maxFilesPerUpload) {
-      errors.push(`You can select at most ${UPLOAD_LIMITS.maxFilesPerUpload} photos at once.`);
-    }
 
     for (const file of files) {
       if (file.size === 0) {
@@ -124,8 +119,63 @@ export function UploadView({ user }: UploadViewProps) {
       }
     }
 
-    setClientErrors(errors);
-    setSelectedFiles(files);
+    return errors;
+  };
+
+  const processFiles = (incoming: File[]) => {
+    setRejectedList([]);
+
+    // An empty selection (e.g. the picker was cancelled) must not clear the
+    // files already chosen.
+    if (incoming.length === 0) return;
+
+    // Accumulate with the current selection, skipping files already picked.
+    const seen = new Set(selectedFiles.map(fileKey));
+    const merged = [...selectedFiles];
+    for (const file of incoming) {
+      const key = fileKey(file);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(file);
+    }
+
+    // Enforce the batch ceiling without discarding the whole selection.
+    const capped = merged.slice(0, UPLOAD_LIMITS.maxFilesPerUpload);
+
+    setClientErrors(validateFiles(capped));
+    setSelectedFiles(capped);
+  };
+
+  const removeFile = (key: string) => {
+    const next = selectedFiles.filter((file) => fileKey(file) !== key);
+    setRejectedList([]);
+    setClientErrors(validateFiles(next));
+    setSelectedFiles(next);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    // Reset the native input so re-selecting files (even the same ones) always
+    // fires onChange; the File objects are already captured above.
+    e.target.value = '';
+    processFiles(files);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    if (!isUploading) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (isUploading) return;
+    processFiles(Array.from(e.dataTransfer.files || []));
   };
 
   const handleUploadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -181,17 +231,34 @@ export function UploadView({ user }: UploadViewProps) {
 
       <main style={{ maxWidth: '960px', margin: '0 auto', padding: '32px 20px 64px' }}>
         {/* Navigation Breadcrumb */}
-        <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#64748b' }}>
+        <div style={{ marginBottom: '24px' }}>
           <Link
             href="/dashboard"
+            aria-label="Back to Dashboard"
+            title="Back to Dashboard"
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               color: '#3b82f6',
               textDecoration: 'none',
-              fontWeight: 500,
               outline: 'none',
             }}
           >
-            ← Back to Dashboard
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M19 12H5" />
+              <path d="m12 19-7-7 7-7" />
+            </svg>
           </Link>
         </div>
 
@@ -209,75 +276,184 @@ export function UploadView({ user }: UploadViewProps) {
         <section
           style={{
             backgroundColor: '#ffffff',
-            borderRadius: '12px',
+            borderRadius: '16px',
             border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
-            padding: '28px',
+            boxShadow:
+              '0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 16px 40px -24px rgba(15, 23, 42, 0.25)',
+            padding: '19px',
             marginBottom: '40px',
           }}
         >
-          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px', color: '#1e293b' }}>
+          <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#0f172a', marginBottom: '2px' }}>
             Upload Photos
           </h2>
+            <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, marginBottom: '12px' }}>
+              JPEG or PNG, up to 5MB each, max 10 photos.
+            </p>
 
           <form onSubmit={handleUploadSubmit} noValidate>
-            <div style={{ marginBottom: '20px' }}>
-              <label
-                htmlFor="product-photo-upload"
+            <input
+              id="product-photo-upload"
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png"
+              onChange={handleFileChange}
+              disabled={isUploading}
+              style={{ display: 'none' }}
+            />
+
+            <label
+              htmlFor="product-photo-upload"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                padding: '26px 29px',
+                textAlign: 'center',
+                border: `2px dashed ${isDragging ? '#2563eb' : '#cbd5e1'}`,
+                borderRadius: '14px',
+                backgroundColor: isDragging ? '#eff6ff' : '#f8fafc',
+                cursor: isUploading ? 'not-allowed' : 'pointer',
+                transition: 'border-color 0.15s ease, background-color 0.15s ease',
+              }}
+            >
+              <span
                 style={{
-                  display: 'block',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  color: '#334155',
-                  marginBottom: '8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '43px',
+                  height: '43px',
+                  borderRadius: '50%',
+                  backgroundColor: isDragging ? '#dbeafe' : '#e0e7ff',
+                  color: '#2563eb',
                 }}
               >
-                Select product images (JPEG, PNG)
-              </label>
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 16V4" />
+                  <path d="m7 9 5-5 5 5" />
+                  <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                </svg>
+              </span>
 
-              <input
-                id="product-photo-upload"
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/jpeg,image/png"
-                onChange={handleFileChange}
-                disabled={isUploading}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  padding: '10px 14px',
-                  fontSize: '14px',
-                  color: '#334155',
-                  backgroundColor: '#f8fafc',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '8px',
-                  cursor: isUploading ? 'not-allowed' : 'pointer',
-                  outline: 'none',
-                }}
-              />
-            </div>
+              <span style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b' }}>
+                Click to upload or drag and drop
+              </span>
+              <span style={{ fontSize: '13px', color: '#475569' }}>
+                You can select multiple product images
+              </span>
+            </label>
 
             {/* Selection summary */}
             {selectedFiles.length > 0 && (
-              <div
-                style={{
-                  marginBottom: '16px',
-                  padding: '12px 16px',
-                  backgroundColor: '#f1f5f9',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  color: '#334155',
-                }}
-              >
-                <strong>{selectedFiles.length} file(s) selected:</strong>
-                <ul style={{ margin: '8px 0 0 18px', padding: 0, fontSize: '13px', color: '#475569' }}>
-                  {selectedFiles.map((file, idx) => (
-                    <li key={`${file.name}-${idx}`}>
-                      {file.name} ({(file.size / (1024 * 1024)).toFixed(2)} MB)
-                    </li>
-                  ))}
-                </ul>
+              <div style={{ marginTop: '16px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
+                  {formatFileCount(selectedFiles.length)}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {selectedFiles.map((file) => {
+                    const key = fileKey(file);
+                    return (
+                      <div
+                        key={key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                          padding: '10px 14px',
+                          backgroundColor: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '10px',
+                          fontSize: '13px',
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: '#334155',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {file.name}
+                        </span>
+                        <span
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <span style={{ color: '#475569' }}>
+                            {(file.size / (1024 * 1024)).toFixed(2)} MB
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeFile(key)}
+                            disabled={isUploading}
+                            aria-label={`Remove ${file.name}`}
+                            title="Remove"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '24px',
+                              height: '24px',
+                              padding: 0,
+                              color: '#475569',
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: isUploading ? 'not-allowed' : 'pointer',
+                              transition: 'color 0.15s ease, background-color 0.15s ease',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = '#ef4444';
+                              e.currentTarget.style.backgroundColor = '#fef2f2';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = '#475569';
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                          >
+                            <svg
+                              width="15"
+                              height="15"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M18 6 6 18" />
+                              <path d="m6 6 12 12" />
+                            </svg>
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -286,13 +462,13 @@ export function UploadView({ user }: UploadViewProps) {
               <div
                 role="alert"
                 style={{
-                  marginBottom: '20px',
+                  marginTop: '16px',
                   padding: '12px 16px',
                   backgroundColor: '#fef2f2',
                   border: '1px solid #fecaca',
-                  borderRadius: '8px',
+                  borderRadius: '10px',
                   color: '#991b1b',
-                  fontSize: '14px',
+                  fontSize: '13.5px',
                 }}
               >
                 <div style={{ fontWeight: 600, marginBottom: '4px' }}>Please resolve the following issues:</div>
@@ -309,13 +485,13 @@ export function UploadView({ user }: UploadViewProps) {
               <div
                 role="alert"
                 style={{
-                  marginBottom: '20px',
+                  marginTop: '16px',
                   padding: '12px 16px',
                   backgroundColor: '#fffbeb',
                   border: '1px solid #fde68a',
-                  borderRadius: '8px',
+                  borderRadius: '10px',
                   color: '#92400e',
-                  fontSize: '14px',
+                  fontSize: '13.5px',
                 }}
               >
                 <div style={{ fontWeight: 600, marginBottom: '4px' }}>Some files could not be processed:</div>
@@ -329,33 +505,35 @@ export function UploadView({ user }: UploadViewProps) {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={selectedFiles.length === 0 || clientErrors.length > 0 || isUploading}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '10px 24px',
-                fontSize: '14px',
-                fontWeight: 600,
-                color: '#ffffff',
-                backgroundColor:
-                  selectedFiles.length === 0 || clientErrors.length > 0 || isUploading
-                    ? '#94a3b8'
-                    : 'var(--color-primary, #2563eb)',
-                border: 'none',
-                borderRadius: '8px',
-                cursor:
-                  selectedFiles.length === 0 || clientErrors.length > 0 || isUploading
-                    ? 'not-allowed'
-                    : 'pointer',
-                boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-                transition: 'background-color 0.15s ease',
-              }}
-            >
-              {isUploading ? 'Uploading & Enqueuing...' : 'Upload & Process'}
-            </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+              <button
+                type="submit"
+                disabled={selectedFiles.length === 0 || clientErrors.length > 0 || isUploading}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '11px 24px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#ffffff',
+                  backgroundColor:
+                    selectedFiles.length === 0 || clientErrors.length > 0 || isUploading
+                      ? '#94a3b8'
+                      : 'var(--color-primary, #2563eb)',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor:
+                    selectedFiles.length === 0 || clientErrors.length > 0 || isUploading
+                      ? 'not-allowed'
+                      : 'pointer',
+                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                  transition: 'background-color 0.15s ease',
+                }}
+              >
+                {isUploading ? 'Uploading & Enqueuing...' : 'Upload & Process'}
+              </button>
+            </div>
           </form>
         </section>
 
@@ -427,9 +605,9 @@ export function UploadView({ user }: UploadViewProps) {
               <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
                 No jobs found
               </h3>
-              <p style={{ fontSize: '14px', color: '#64748b' }}>
-                You have not uploaded any product photos yet. Select photos above to begin extraction.
-              </p>
+               <p style={{ fontSize: '14px', color: '#475569' }}>
+                 You have not uploaded any product photos yet. Select photos above to begin extraction.
+               </p>
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
@@ -476,22 +654,22 @@ export function UploadView({ user }: UploadViewProps) {
                               fontWeight: 600,
                               textTransform: 'uppercase',
                               letterSpacing: '0.05em',
-                              backgroundColor:
-                                job.status === 'done'
-                                  ? '#dcfce7'
-                                  : job.status === 'failed'
-                                  ? '#fee2e2'
-                                  : job.status === 'processing'
-                                  ? '#e0e7ff'
-                                  : '#f1f5f9',
-                              color:
-                                job.status === 'done'
-                                  ? '#15803d'
-                                  : job.status === 'failed'
-                                  ? '#b91c1c'
-                                  : job.status === 'processing'
-                                  ? '#4338ca'
-                                  : '#475569',
+                               backgroundColor:
+                                 job.status === 'done'
+                                   ? '#dcfce7'
+                                   : job.status === 'failed'
+                                   ? '#fee2e2'
+                                   : job.status === 'processing'
+                                   ? '#e0e7ff'
+                                   : '#f1f5f9',
+                               color:
+                                 job.status === 'done'
+                                   ? '#166534'
+                                   : job.status === 'failed'
+                                   ? '#b91c1c'
+                                   : job.status === 'processing'
+                                   ? '#4338ca'
+                                   : '#475569',
                             }}
                           >
                             {job.status}
