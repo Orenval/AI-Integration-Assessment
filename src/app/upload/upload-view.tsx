@@ -335,10 +335,15 @@ export function UploadView({ user }: UploadViewProps) {
             marginBottom: '40px',
           }}
         >
-          <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#0f172a', marginBottom: '10px' }}>
+          <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#0f172a', marginBottom: '4px' }}>
             Upload photos
           </h2>
-
+          <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, marginBottom: '12px' }}>
+            {UPLOAD_LIMITS.allowedMimeTypes.includes('image/jpeg') && UPLOAD_LIMITS.allowedMimeTypes.includes('image/png')
+              ? 'JPEG or PNG'
+              : UPLOAD_LIMITS.allowedMimeTypes.map((type) => type.replace('image/', '').toUpperCase()).join(' or ')}
+            , up to {(UPLOAD_LIMITS.maxFileSizeBytes / (1024 * 1024)).toFixed(0)}MB each, up to {UPLOAD_LIMITS.maxFilesPerUpload} photos.
+          </p>
 
           <form onSubmit={handleUploadSubmit} noValidate>
             <input
