@@ -7,6 +7,21 @@ import { JobDetailDto } from '@/lib/ai/types';
 import { ExtractionResult } from '@/lib/ai/schemas';
 import { ensureCsrfToken } from '@/lib/api-client';
 
+function jobStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending':
+      return 'Waiting';
+    case 'processing':
+      return 'Working';
+    case 'done':
+      return 'Done';
+    case 'failed':
+      return 'Failed';
+    default:
+      return status;
+  }
+}
+
 interface JobDetailViewProps {
   jobId: string;
   user: {
@@ -34,7 +49,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
         if (res.status === 404) {
           setError('Job not found or access denied.');
         } else {
-          setError('Failed to load job details.');
+          setError('Could not load this listing.');
         }
         return;
       }
@@ -47,7 +62,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
         }
       }
     } catch {
-      setError('Network error while loading job details.');
+      setError('Network error. We could not load this listing.');
     } finally {
       setIsLoading(false);
     }
@@ -92,10 +107,10 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
       if (res.ok && data.success && data.expandedResult) {
         setExpandedText(data.expandedResult);
       } else {
-        setExpandError(data.message || 'Failed to expand product listing.');
+        setExpandError(data.message || 'Please try again.');
       }
     } catch {
-      setExpandError('Network error while requesting expanded description.');
+      setExpandError('Network error. Please try again.');
     } finally {
       setIsExpanding(false);
     }
@@ -110,16 +125,16 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
       <main style={{ maxWidth: '840px', margin: '0 auto', padding: '32px 20px 64px' }}>
         {/* Navigation Breadcrumb */}
         <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#64748b' }}>
-          <Link
-            href="/upload"
-            style={{
+           <Link
+             href="/upload"
+             style={{
                color: '#2563eb',
                textDecoration: 'none',
                fontWeight: 500,
                outline: 'none',
              }}
            >
-             ← Back to Uploads
+             ← Back to uploads
            </Link>
         </div>
 
@@ -134,7 +149,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
               color: '#64748b',
             }}
           >
-            Loading extraction details...
+            Loading your listing...
           </div>
         ) : error ? (
           <div
@@ -165,7 +180,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                 textDecoration: 'none',
               }}
             >
-              Return to Uploads
+              Return to uploads
             </Link>
           </div>
         ) : job?.status !== 'done' ? (
@@ -193,7 +208,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                   color: job?.status === 'failed' ? '#b91c1c' : '#4338ca',
                 }}
               >
-                Status: {job?.status}
+                Status: {job?.status ? jobStatusLabel(job.status) : ''}
               </span>
             </div>
 
@@ -207,7 +222,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                   {job.errorMessage || 'AI extraction failed for this photo.'}
                 </p>
                 <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '20px' }}>
-                  Upload the photo again to retry.
+                   Something went wrong. Upload the photo again to retry.
                 </p>
                 <Link
                   href="/upload"
@@ -222,13 +237,13 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                     textDecoration: 'none',
                   }}
                 >
-                  Go to Upload Page
+                   Go to upload page
                 </Link>
               </div>
             ) : (
               <div>
                 <p style={{ color: '#475569', fontSize: '15px', marginBottom: '16px' }}>
-                  This photo is currently being processed by Gemini. Please wait a moment.
+                  Still working on this photo.
                 </p>
                 <button
                   type="button"
@@ -277,7 +292,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                       marginBottom: '8px',
                     }}
                   >
-                    Extraction Done
+                    Done
                   </span>
                   <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
                     {extraction?.title || job.originalFileName}
@@ -302,8 +317,8 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
               {/* Short Description */}
               <div style={{ marginBottom: '22px' }}>
                 <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '4px' }}>
-                  Short Description
-                </span>
+                   Description
+                 </span>
                 <p style={{ fontSize: '15px', lineHeight: 1.6, color: '#1e293b' }}>
                   {extraction?.shortDescription}
                 </p>
@@ -312,8 +327,8 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
               {/* Estimated Tags */}
               <div>
                 <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
-                  Estimated Tags
-                </span>
+                   Tags
+                 </span>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {extraction?.estimatedTags && extraction.estimatedTags.length > 0 ? (
                     extraction.estimatedTags.map((tag, idx) => (
@@ -353,10 +368,10 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
-                    Extended Product Listing (Expand Action)
+                    Extended listing
                   </h2>
                   <p style={{ color: '#64748b', fontSize: '14px', marginTop: '2px' }}>
-                    Generate a rich 150–250 word marketing description using only validated facts from the extraction.
+                    Write a longer description using only the facts from the extraction.
                   </p>
                 </div>
               </div>
@@ -374,7 +389,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                     marginBottom: '16px',
                   }}
                 >
-                  <div style={{ fontWeight: 600 }}>Expansion Error</div>
+                  <div style={{ fontWeight: 600 }}>We could not write the listing. Please try again.</div>
                   <div>{expandError}</div>
                 </div>
               )}
@@ -414,7 +429,7 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                       transition: 'background-color 0.15s ease',
                     }}
                   >
-                    {isExpanding ? 'Expanding Description with Gemini...' : '✨ Expand Description'}
+                     {isExpanding ? 'Writing your listing' : 'Write a longer listing'}
                   </button>
                 </div>
               )}

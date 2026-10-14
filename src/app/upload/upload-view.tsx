@@ -7,9 +7,47 @@ import { UPLOAD_LIMITS } from '@/lib/ai/config';
 import { JobDto } from '@/lib/ai/types';
 import { ensureCsrfToken } from '@/lib/api-client';
 
-function formatFileCount(count: number): string {
-  if (count === 0) return 'No files selected';
-  return count === 1 ? '1 file selected' : `${count} files selected`;
+function formatPhotoCount(count: number): string {
+  if (count === 0) return 'No photos selected';
+  return count === 1 ? '1 photo selected' : `${count} photos selected`;
+}
+
+const MAX_FILE_SIZE_MB = UPLOAD_LIMITS.maxFileSizeBytes / (1024 * 1024);
+
+function photoIssue(file: File): string | null {
+  if (file.size === 0) {
+    return 'This photo is empty (0 bytes).';
+  }
+  if (file.size > UPLOAD_LIMITS.maxFileSizeBytes) {
+    return `This photo is larger than ${MAX_FILE_SIZE_MB}MB.`;
+  }
+  if (
+    !UPLOAD_LIMITS.allowedMimeTypes.includes(
+      file.type as 'image/jpeg' | 'image/png'
+    )
+  ) {
+    return 'Only JPEG or PNG photos are allowed.';
+  }
+  return null;
+}
+
+function isValidPhoto(file: File): boolean {
+  return photoIssue(file) === null;
+}
+
+function jobStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending':
+      return 'Waiting';
+    case 'processing':
+      return 'Working';
+    case 'done':
+      return 'Done';
+    case 'failed':
+      return 'Failed';
+    default:
+      return status;
+  }
 }
 
 interface UploadViewProps {
@@ -34,6 +72,7 @@ export function UploadView({ user }: UploadViewProps) {
   const [isLoadingJobs, setIsLoadingJobs] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [previewUrls, setPreviewUrls] = useState<{ key: string; name: string; url: string }[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isPollingRef = useRef(false);
@@ -58,10 +97,10 @@ export function UploadView({ user }: UploadViewProps) {
           setFetchError(null);
         }
       } else {
-        setFetchError('Failed to refresh recent jobs');
+        setFetchError('Could not refresh your uploads.');
       }
     } catch {
-      setFetchError('Network error while checking job status');
+      setFetchError('Network error. We will try again.');
     } finally {
       setIsLoadingJobs(false);
       setIsRefreshing(false);
@@ -100,22 +139,36 @@ export function UploadView({ user }: UploadViewProps) {
     return () => clearInterval(intervalId);
   }, [hasActiveJobs, fetchJobs]);
 
+  // Local blob previews for valid photos only. Links live in state and are
+  // revoked on every list change and on unmount. Nothing is sent to the server.
+  useEffect(() => {
+    const entries = selectedFiles
+      .filter(isValidPhoto)
+      .map((file) => ({
+        key: `${file.name}:${file.size}:${file.lastModified}`,
+        name: file.name,
+        url: URL.createObjectURL(file),
+      }));
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- blob URLs must live in state so the cleanup can revoke them; creating them during render is not allowed.
+    setPreviewUrls(entries);
+
+    return () => {
+      for (const entry of entries) {
+        URL.revokeObjectURL(entry.url);
+      }
+    };
+  }, [selectedFiles]);
+
   const fileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 
   const validateFiles = (files: File[]): string[] => {
     const errors: string[] = [];
 
     for (const file of files) {
-      if (file.size === 0) {
-        errors.push(`"${file.name}" is empty (0 bytes).`);
-      } else if (file.size > UPLOAD_LIMITS.maxFileSizeBytes) {
-        errors.push(
-          `"${file.name}" exceeds the 5MB limit (${(file.size / (1024 * 1024)).toFixed(2)}MB).`
-        );
-      }
-
-      if (!UPLOAD_LIMITS.allowedMimeTypes.includes(file.type as 'image/jpeg' | 'image/png')) {
-        errors.push(`"${file.name}" has an unsupported format (${file.type || 'unknown'}). Only JPEG and PNG are allowed.`);
+      const issue = photoIssue(file);
+      if (issue) {
+        errors.push(`"${file.name}": ${issue}`);
       }
     }
 
@@ -219,7 +272,7 @@ export function UploadView({ user }: UploadViewProps) {
         }
       }
     } catch {
-      setClientErrors(['Network error during upload. Please check your connection.']);
+      setClientErrors(['Network error. Please check your connection and try again.']);
     } finally {
       setIsUploading(false);
     }
@@ -265,11 +318,9 @@ export function UploadView({ user }: UploadViewProps) {
         {/* Header Title */}
         <div style={{ marginBottom: '32px' }}>
           <h1 style={{ fontSize: '28px', fontWeight: 700, letterSpacing: '-0.02em', color: '#0f172a', marginBottom: '8px' }}>
-            Product Photo Extraction
+            Upload product photos
           </h1>
-          <p style={{ color: '#475569', fontSize: '15px', lineHeight: 1.5 }}>
-            Upload product photos (JPEG or PNG, up to 5MB each, max 10 photos). Gemini will extract structured catalog details in the background.
-          </p>
+
         </div>
 
         {/* Upload Form Card */}
@@ -284,12 +335,10 @@ export function UploadView({ user }: UploadViewProps) {
             marginBottom: '40px',
           }}
         >
-          <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#0f172a', marginBottom: '2px' }}>
-            Upload Photos
+          <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#0f172a', marginBottom: '10px' }}>
+            Upload photos
           </h2>
-            <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, marginBottom: '12px' }}>
-              JPEG or PNG, up to 5MB each, max 10 photos.
-            </p>
+
 
           <form onSubmit={handleUploadSubmit} noValidate>
             <input
@@ -323,52 +372,104 @@ export function UploadView({ user }: UploadViewProps) {
                 transition: 'border-color 0.15s ease, background-color 0.15s ease',
               }}
             >
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '43px',
-                  height: '43px',
-                  borderRadius: '50%',
-                  backgroundColor: isDragging ? '#dbeafe' : '#e0e7ff',
-                  color: '#2563eb',
-                }}
-              >
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M12 16V4" />
-                  <path d="m7 9 5-5 5 5" />
-                  <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-                </svg>
-              </span>
+              {previewUrls.length > 0 ? (
+                <div style={{ width: '100%' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- local blob preview, not optimisable */}
+                  <img
+                    src={previewUrls[0].url}
+                    alt={`Preview of ${previewUrls[0].name}`}
+                    style={{
+                      display: 'block',
+                      margin: '0 auto',
+                      maxHeight: '280px',
+                      maxWidth: '100%',
+                      objectFit: 'contain',
+                      borderRadius: '8px',
+                    }}
+                  />
 
-              <span style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b' }}>
-                Click to upload or drag and drop
-              </span>
-              <span style={{ fontSize: '13px', color: '#475569' }}>
-                You can select multiple product images
-              </span>
+                  {previewUrls.length > 1 && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        justifyContent: 'center',
+                        marginTop: '12px',
+                      }}
+                    >
+                      {previewUrls.slice(1).map((preview) => (
+                        // eslint-disable-next-line @next/next/no-img-element -- local blob preview, not optimisable
+                        <img
+                          key={preview.key}
+                          src={preview.url}
+                          alt={`Preview of ${preview.name}`}
+                          style={{
+                            width: '64px',
+                            height: '64px',
+                            objectFit: 'cover',
+                            borderRadius: '8px',
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <p style={{ fontSize: '12px', color: '#475569', marginTop: '12px' }}>
+                    Choose again to add more photos. Use the X to remove one.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '43px',
+                      height: '43px',
+                      borderRadius: '50%',
+                      backgroundColor: isDragging ? '#dbeafe' : '#e0e7ff',
+                      color: '#2563eb',
+                    }}
+                  >
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 16V4" />
+                      <path d="m7 9 5-5 5 5" />
+                      <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                    </svg>
+                  </span>
+
+                  <span style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b' }}>
+                    Drop photos here, or click to choose
+                  </span>
+                  <span style={{ fontSize: '13px', color: '#475569' }}>
+                    Pick one or many. We write a listing for each photo.
+                  </span>
+                </>
+              )}
             </label>
 
             {/* Selection summary */}
             {selectedFiles.length > 0 && (
               <div style={{ marginTop: '16px' }}>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
-                  {formatFileCount(selectedFiles.length)}
+                  {formatPhotoCount(selectedFiles.length)}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {selectedFiles.map((file) => {
                     const key = fileKey(file);
+                    const issue = photoIssue(file);
                     return (
                       <div
                         key={key}
@@ -386,13 +487,26 @@ export function UploadView({ user }: UploadViewProps) {
                       >
                         <span
                           style={{
-                            color: '#334155',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            minWidth: 0,
                           }}
                         >
-                          {file.name}
+                          <span
+                            style={{
+                              color: '#334155',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {file.name}
+                          </span>
+                          {issue && (
+                            <span style={{ color: '#b91c1c', marginTop: '2px' }}>
+                              {issue}
+                            </span>
+                          )}
                         </span>
                         <span
                           style={{
@@ -471,7 +585,7 @@ export function UploadView({ user }: UploadViewProps) {
                   fontSize: '13.5px',
                 }}
               >
-                <div style={{ fontWeight: 600, marginBottom: '4px' }}>Please resolve the following issues:</div>
+                <div style={{ fontWeight: 600, marginBottom: '4px' }}>Please fix these before uploading:</div>
                 <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
                   {clientErrors.map((err, idx) => (
                     <li key={idx}>{err}</li>
@@ -494,7 +608,7 @@ export function UploadView({ user }: UploadViewProps) {
                   fontSize: '13.5px',
                 }}
               >
-                <div style={{ fontWeight: 600, marginBottom: '4px' }}>Some files could not be processed:</div>
+                <div style={{ fontWeight: 600, marginBottom: '4px' }}>These files were not added:</div>
                 <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
                   {rejectedList.map((item, idx) => (
                     <li key={idx}>
@@ -531,7 +645,7 @@ export function UploadView({ user }: UploadViewProps) {
                   transition: 'background-color 0.15s ease',
                 }}
               >
-                {isUploading ? 'Uploading & Enqueuing...' : 'Upload & Process'}
+                {isUploading ? 'Processing...' : 'Process'}
               </button>
             </div>
           </form>
@@ -551,12 +665,12 @@ export function UploadView({ user }: UploadViewProps) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <div>
               <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
-                Recent Processing Jobs
+                Your recent uploads
               </h2>
               {hasActiveJobs && (
                 <span style={{ fontSize: '13px', color: '#2563eb', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
                   <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-                  Processing active jobs in queue (polling every 2s)...
+                   Working on your photos. This updates on its own.
                 </span>
               )}
             </div>
@@ -588,7 +702,7 @@ export function UploadView({ user }: UploadViewProps) {
 
           {isLoadingJobs && jobs.length === 0 ? (
             <div style={{ padding: '32px', textAlign: 'center', color: '#64748b', fontSize: '14px' }}>
-              Loading recent jobs...
+               Loading your uploads...
             </div>
           ) : jobs.length === 0 ? (
             /* Empty state */
@@ -602,22 +716,22 @@ export function UploadView({ user }: UploadViewProps) {
               }}
             >
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>📷</div>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                No jobs found
-              </h3>
-               <p style={{ fontSize: '14px', color: '#475569' }}>
-                 You have not uploaded any product photos yet. Select photos above to begin extraction.
-               </p>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  No uploads yet
+                </h3>
+                <p style={{ fontSize: '14px', color: '#475569' }}>
+                  Choose a photo above to get started.
+                </p>
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>File Name</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Attempts</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Details / Action</th>
+                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Photo</th>
+                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
+                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Tries</th>
+                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Result</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -672,8 +786,8 @@ export function UploadView({ user }: UploadViewProps) {
                                    : '#475569',
                             }}
                           >
-                            {job.status}
-                          </span>
+                               {jobStatusLabel(job.status)}
+                             </span>
                         </td>
 
                         {/* Attempts */}
@@ -697,22 +811,22 @@ export function UploadView({ user }: UploadViewProps) {
                                 textDecoration: 'none',
                               }}
                             >
-                              View Result →
-                            </Link>
+                               View listing
+                             </Link>
                           )}
 
                           {job.status === 'failed' && (
                             <div style={{ fontSize: '13px', color: '#b91c1c' }}>
-                              <div>{job.errorMessage || 'An error occurred.'}</div>
+                              <div>{job.errorMessage || 'Something went wrong.'}</div>
                               <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>
-                                Upload the photo again to retry.
+                                 Something went wrong. Upload the photo again to retry.
                               </div>
                             </div>
                           )}
 
                           {(job.status === 'pending' || job.status === 'processing') && (
                             <span style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>
-                              {job.status === 'processing' ? 'Analyzing with Gemini...' : 'Waiting in queue...'}
+                               {jobStatusLabel(job.status)}
                             </span>
                           )}
                         </td>
