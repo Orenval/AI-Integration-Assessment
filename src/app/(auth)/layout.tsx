@@ -9,7 +9,7 @@ const PROTECTED_ROUTES = ["/verify-email"];
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
 
   useEffect(() => {
     if (isLoading) return;
@@ -20,14 +20,18 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       AUTHENTICATED_REDIRECT_ROUTES.some((r) => path.startsWith(r)) &&
       isAuthenticated
     ) {
-      router.replace("/dashboard");
+      if (user && !user.emailVerified) {
+        router.replace("/verify-email");
+      } else {
+        router.replace("/dashboard");
+      }
       return;
     }
 
     if (PROTECTED_ROUTES.some((r) => path.startsWith(r)) && !isAuthenticated) {
       router.replace("/signin");
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, user, router]);
 
   if (isLoading) return null;
 

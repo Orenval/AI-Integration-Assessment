@@ -5,8 +5,9 @@
 // This file is strictly client-safe (no Node-only packages or secrets) so client
 // components can import upload and file limits directly.
 
-// Selected Flash model: Gemini 2.5 Flash offers low latency and multi-modal image understanding.
-export const GEMINI_MODEL = 'gemini-2.5-flash';
+// Selected Flash model: Gemini 3.1 Flash Lite offers low latency and multi-modal image understanding.
+// Note: gemini-2.5-flash was retired for new API keys (returns 404), so the current lite model is used.
+export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 
 export const AI_CONFIG = {
   extraction: {

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
+import { AppLogo } from "@/components/app-logo";
 
 // Palette used to derive a per-user avatar background. The color is picked
 // deterministically from the user's identity so it is stable across sessions
@@ -94,7 +96,10 @@ export function DashboardHeader({
 
   return (
     <header className="dashboard-header">
-      <div className="dashboard-header__brand">Auth</div>
+      <Link href="/dashboard" className="dashboard-header__brand">
+        <AppLogo size={32} />
+        <span>Ai Integration</span>
+      </Link>
 
       <div className="user-menu" ref={menuRef}>
         <button

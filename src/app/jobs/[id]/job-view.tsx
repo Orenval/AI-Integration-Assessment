@@ -124,18 +124,35 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
 
       <main style={{ maxWidth: '840px', margin: '0 auto', padding: '32px 20px 64px' }}>
         {/* Navigation Breadcrumb */}
-        <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#64748b' }}>
-           <Link
-             href="/upload"
-             style={{
-               color: '#2563eb',
-               textDecoration: 'none',
-               fontWeight: 500,
-               outline: 'none',
-             }}
-           >
-             ← Back to uploads
-           </Link>
+        <div style={{ marginBottom: '24px' }}>
+          <Link
+            href="/upload"
+            aria-label="Back to upload"
+            title="Back to upload"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#2563eb',
+              textDecoration: 'none',
+              outline: 'none',
+            }}
+          >
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M19 12H5" />
+              <path d="m12 19-7-7 7-7" />
+            </svg>
+          </Link>
         </div>
 
         {isLoading ? (

@@ -22,15 +22,32 @@ export default async function DashboardPage() {
   return (
     <div className="dashboard-page">
       <DashboardHeader user={sessionData.user} />
-      <main className="dashboard-main">
-        <h1 className="dashboard-heading">Welcome to Auth, {firstName}</h1>
-        <div style={{ marginTop: "24px" }}>
+      <main
+        className="dashboard-main"
+        style={{
+          minHeight: "calc(100vh - 64px)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <h1 className="dashboard-heading">Welcome, {firstName}</h1>
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <Link
             href="/upload"
             className="btn-primary"
             style={{
-              display: "inline-block",
-              padding: "10px 20px",
+              display: "block",
+              width: "fit-content",
+              margin: "0 auto",
+              padding: "14px 36px",
+              fontSize: "16px",
               backgroundColor: "var(--color-primary, #2563eb)",
               color: "#ffffff",
               borderRadius: "6px",

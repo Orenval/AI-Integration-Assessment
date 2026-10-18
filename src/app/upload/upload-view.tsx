@@ -329,8 +329,7 @@ export function UploadView({ user }: UploadViewProps) {
             backgroundColor: '#ffffff',
             borderRadius: '16px',
             border: '1px solid #e2e8f0',
-            boxShadow:
-              '0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 16px 40px -24px rgba(15, 23, 42, 0.25)',
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
             padding: '19px',
             marginBottom: '40px',
           }}

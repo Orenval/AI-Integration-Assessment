@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { signInSchema } from "@/lib/validation";
 import { apiFetch, ensureCsrfToken } from "@/lib/api-client";
 import { useAuth } from "@/context/auth-context";
+import { AppLogo } from "@/components/app-logo";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -94,6 +95,9 @@ export default function SignInPage() {
   return (
     <div className="auth-container">
       <main className="auth-card">
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+          <AppLogo size={48} />
+        </div>
         <h1 className="auth-title">Sign In</h1>
         <p className="auth-subtitle">Enter your email and password to access your account.</p>
 

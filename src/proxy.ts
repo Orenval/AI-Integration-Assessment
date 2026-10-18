@@ -8,7 +8,7 @@
 // Proxy runs on the edge/Node runtime before routes are rendered. It performs
 // a lightweight check (cookie existence) to redirect unauthenticated users.
 // The full session validation (token hash lookup, timeout checks) happens in
-// the API routes and the client-side AuthGuard — Proxy is the first line of
+// the API routes and the (auth) layout guard — Proxy is the first line of
 // defense, not the only one.
 
 import { NextResponse } from "next/server";

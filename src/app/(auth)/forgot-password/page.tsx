@@ -12,6 +12,7 @@ import {
 import { apiFetch, ensureCsrfToken } from "@/lib/api-client";
 import { useAuth } from "@/context/auth-context";
 import { OtpInput } from "@/components/otp-input";
+import { AppLogo } from "@/components/app-logo";
 
 const RESEND_COOLDOWN_S = 60;
 
@@ -292,6 +293,9 @@ export default function ForgotPasswordPage() {
     return (
       <div className="auth-container">
         <main className="auth-card">
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+            <AppLogo size={48} />
+          </div>
           <h1 className="auth-title">Forgot Password</h1>
           <p className="auth-subtitle">
             Enter your email and we&apos;ll send you a 6-digit code to reset your password.
@@ -349,6 +353,9 @@ export default function ForgotPasswordPage() {
     return (
       <div className="auth-container">
         <main className="auth-card">
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+            <AppLogo size={48} />
+          </div>
           <h1 className="auth-title">Enter Reset Code</h1>
           <p className="auth-subtitle">
             A 6-digit code has been sent to <strong>{email.trim()}</strong>.
@@ -434,6 +441,9 @@ export default function ForgotPasswordPage() {
   return (
     <div className="auth-container">
       <main className="auth-card">
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+          <AppLogo size={48} />
+        </div>
         <h1 className="auth-title">Set New Password</h1>
         <p className="auth-subtitle">
           Enter a new password for your account. It will apply immediately.

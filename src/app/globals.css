@@ -148,6 +148,33 @@ a {
   border: 1px solid var(--success-border);
 }
 
+.redirect-progress-wrap {
+  margin-top: 10px;
+  height: 4px;
+  width: 100%;
+  background: var(--success-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.redirect-progress-bar {
+  height: 100%;
+  width: 100%;
+  background: var(--success-color);
+  border-radius: 999px;
+  transform-origin: left;
+  animation: redirect-progress 1.5s linear forwards;
+}
+
+@keyframes redirect-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* =========================================================================
    Forms & Inputs
    ========================================================================= */
@@ -419,6 +446,14 @@ a {
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.025em;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.dashboard-header__brand:hover {
+  opacity: 0.95;
 }
 
 .user-menu {

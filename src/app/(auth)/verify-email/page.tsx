@@ -6,6 +6,7 @@ import { verifyEmailSchema } from "@/lib/validation";
 import { apiFetch, ensureCsrfToken } from "@/lib/api-client";
 import { useAuth } from "@/context/auth-context";
 import { OtpInput } from "@/components/otp-input";
+import { AppLogo } from "@/components/app-logo";
 
 interface CooldownData {
   emailVerified?: boolean;
@@ -190,6 +191,9 @@ export default function VerifyEmailPage() {
   return (
     <div className="auth-container">
       <main className="auth-card">
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+          <AppLogo size={48} />
+        </div>
         <h1 className="auth-title">Verify your email</h1>
         <p className="auth-subtitle">
           We sent a 6-digit verification code to{" "}
