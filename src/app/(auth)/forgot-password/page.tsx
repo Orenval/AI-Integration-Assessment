@@ -248,11 +248,23 @@ export default function ForgotPasswordPage() {
     setIsResetting(true);
 
     try {
-      const res = await apiFetch("/api/auth/reset-password", {
+      const res = await apiFetch<{ expired?: boolean }>("/api/auth/reset-password", {
         body: JSON.stringify({ email: sanitizedEmail, flowId, code, password }),
       });
 
       if (!res.success) {
+        if (res.data?.expired || res.message?.toLowerCase().includes("expired")) {
+          setStep("email");
+          setGeneralError("That code has expired. Request a new one.");
+          setFlowId("");
+          setCode("");
+          setPassword("");
+          setConfirmPassword("");
+          setPasswordTouched(false);
+          setErrors({});
+          return;
+        }
+
         setGeneralError(
           res.retryAfter
             ? `${res.message} (Retry after ${res.retryAfter}s)`

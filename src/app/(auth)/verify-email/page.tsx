@@ -117,7 +117,7 @@ export default function VerifyEmailPage() {
     setIsLoading(true);
 
     try {
-      const res = await apiFetch("/api/auth/verify-email", {
+      const res = await apiFetch<{ expired?: boolean }>("/api/auth/verify-email", {
         body: JSON.stringify({ code: verificationCode }),
       });
 
@@ -126,7 +126,11 @@ export default function VerifyEmailPage() {
       }
 
       if (!res.success) {
-        setGeneralError(res.message);
+        if (res.data?.expired || res.message?.toLowerCase().includes("expired")) {
+          setGeneralError("That code has expired. Request a new one.");
+        } else {
+          setGeneralError(res.message);
+        }
         return;
       }
 

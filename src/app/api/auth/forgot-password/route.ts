@@ -21,9 +21,9 @@ import { validateCsrfToken } from "@/lib/csrf";
 import { checkRateLimit, recordFailedAttempt } from "@/lib/rate-limit";
 import {
   generateResetCode,
-  RESET_CODE_EXPIRY_MS,
   RESET_RESEND_COOLDOWN_MS,
 } from "@/lib/reset-code";
+import { RESET_CODE_TTL_MS } from "@/lib/auth-config";
 import { sendPasswordResetEmail } from "@/lib/email";
 
 // The generic response returned regardless of whether the email exists.
@@ -122,13 +122,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         where: { userId: user.id, usedAt: null },
       });
 
-      const { code, codeHash } = generateResetCode();
+      const { code, codeHash } = await generateResetCode();
 
       await prisma.passwordResetToken.create({
         data: {
           userId: user.id,
           codeHash,
-          expiresAt: new Date(now.getTime() + RESET_CODE_EXPIRY_MS),
+          expiresAt: new Date(now.getTime() + RESET_CODE_TTL_MS),
           resendCooldownUntil: new Date(
             now.getTime() + RESET_RESEND_COOLDOWN_MS
           ),

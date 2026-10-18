@@ -5,19 +5,38 @@
 // Configured from environment variables (see .env.example).
 
 import nodemailer from "nodemailer";
+import { VERIFICATION_CODE_TTL_MS, RESET_CODE_TTL_MS } from "./auth-config";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatTtl(ttlMs: number): string {
+  const minutes = Math.round(ttlMs / 60000);
+  if (minutes < 1) {
+    const seconds = Math.round(ttlMs / 1000);
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
 
 // ---------------------------------------------------------------------------
 // Transporter Configuration
 // ---------------------------------------------------------------------------
 
+const port = Number(process.env.SMTP_PORT) || 465;
+
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: Number(process.env.SMTP_PORT) === 465, // true for port 465 (SSL), false for STARTTLS
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
+  port,
+  secure: port === 465, // true for port 465 (SSL), false for STARTTLS
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
 });
 
 const FROM_ADDRESS = process.env.SMTP_FROM || "Auth Assessment <noreply@localhost>";
@@ -42,6 +61,7 @@ export async function sendVerificationEmail(
   name: string
 ): Promise<void> {
   const firstName = name.split(" ")[0];
+  const expiryText = formatTtl(VERIFICATION_CODE_TTL_MS);
 
   await transporter.sendMail({
     from: FROM_ADDRESS,
@@ -59,11 +79,11 @@ export async function sendVerificationEmail(
           </span>
         </div>
         <p style="color: #888; font-size: 14px; line-height: 1.5;">
-          This code expires in 10 minutes. If you didn't create an account, you can safely ignore this email.
+          This code expires in ${expiryText}. If you didn't create an account, you can safely ignore this email.
         </p>
       </div>
     `,
-    text: `Hi ${firstName}, your verification code is: ${code}. This code expires in 10 minutes.`,
+    text: `Hi ${firstName}, your verification code is: ${code}. This code expires in ${expiryText}.`,
   });
 }
 
@@ -84,6 +104,7 @@ export async function sendPasswordResetEmail(
   name: string
 ): Promise<void> {
   const firstName = name.split(" ")[0];
+  const expiryText = formatTtl(RESET_CODE_TTL_MS);
 
   await transporter.sendMail({
     from: FROM_ADDRESS,
@@ -101,12 +122,12 @@ export async function sendPasswordResetEmail(
           </span>
         </div>
         <p style="color: #888; font-size: 14px; line-height: 1.5;">
-          This code expires in 1 hour and can only be used once. If you didn't request a password reset,
+          This code expires in ${expiryText} and can only be used once. If you didn't request a password reset,
           you can safely ignore this email.
         </p>
       </div>
     `,
-    text: `Hi ${firstName}, your password reset code is: ${code}. This code expires in 1 hour and can only be used once.`,
+    text: `Hi ${firstName}, your password reset code is: ${code}. This code expires in ${expiryText} and can only be used once.`,
   });
 }
 

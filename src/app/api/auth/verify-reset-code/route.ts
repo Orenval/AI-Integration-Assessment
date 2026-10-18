@@ -15,16 +15,15 @@
 //           wrong, expired, or already used.
 // - Req 12: Single-use (usedAt) and time-limited (expiresAt) codes
 // - Req 15: CSRF validation
+// - bcrypt compare with atomic attempt reservation and equalized timing
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyResetCodeSchema } from "@/lib/validation";
 import { validateCsrfToken } from "@/lib/csrf";
 import { checkRateLimit, recordFailedAttempt } from "@/lib/rate-limit";
-import {
-  hashResetCode,
-  MAX_RESET_CODE_ATTEMPTS,
-} from "@/lib/reset-code";
+import { compareCode, DUMMY_CODE_HASH } from "@/lib/verification";
+import { MAX_RESET_CODE_ATTEMPTS } from "@/lib/reset-code";
 
 // Uniform response for ALL failure paths — no information leakage (Requirement 7).
 const INVALID_CODE_RESPONSE = NextResponse.json(
@@ -91,13 +90,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  // ---- Look up user (silent if missing — no information leakage) ----
+  // ---- Look up user (silent if missing — run dummy compare to equalize timing) ----
   const user = await prisma.user.findUnique({
     where: { email: normalizedEmail },
   });
 
   if (!user) {
-    // Throttle probes, but return the identical generic message.
+    await compareCode(code, DUMMY_CODE_HASH);
     await recordFailedAttempt(normalizedEmail, "verify-reset-code");
     return INVALID_CODE_RESPONSE;
   }
@@ -111,34 +110,57 @@ export async function POST(request: Request): Promise<NextResponse> {
     orderBy: { createdAt: "desc" },
   });
 
-  // Any missing/invalid/expired/used code fails identically.
   const now = new Date();
-  const isInvalid =
-    !resetCode ||
-    resetCode.expiresAt.getTime() < now.getTime() ||
-    resetCode.attemptCount >= MAX_RESET_CODE_ATTEMPTS ||
-    hashResetCode(code) !== resetCode.codeHash;
 
-  if (isInvalid) {
-    if (resetCode && resetCode.attemptCount < MAX_RESET_CODE_ATTEMPTS) {
-      // A real, unexpired code was submitted with the wrong digits: count the
-      // attempt (locks the code out at MAX_RESET_CODE_ATTEMPTS) and throttle.
-      await prisma.passwordResetToken.update({
-        where: { id: resetCode.id },
-        data: { attemptCount: { increment: 1 } },
-      });
-    }
+  // If no active row exists, or expired, or locked: run dummy compare and reject
+  if (
+    !resetCode ||
+    resetCode.expiresAt.getTime() <= now.getTime() ||
+    resetCode.attemptCount >= MAX_RESET_CODE_ATTEMPTS
+  ) {
+    await compareCode(code, DUMMY_CODE_HASH);
     await recordFailedAttempt(normalizedEmail, "verify-reset-code");
     return INVALID_CODE_RESPONSE;
   }
 
-  const validCode = resetCode!;
+  // ---- Reserve an attempt before comparing (Step 3: atomic reservation) ----
+  const reserveResult = await prisma.passwordResetToken.updateMany({
+    where: {
+      id: resetCode.id,
+      attemptCount: { lt: MAX_RESET_CODE_ATTEMPTS },
+      expiresAt: { gt: now },
+      usedAt: null,
+    },
+    data: {
+      attemptCount: { increment: 1 },
+    },
+  });
+
+  if (reserveResult.count === 0) {
+    await compareCode(code, DUMMY_CODE_HASH);
+    await recordFailedAttempt(normalizedEmail, "verify-reset-code");
+    return INVALID_CODE_RESPONSE;
+  }
+
+  // ---- Check expiry again in code ----
+  if (resetCode.expiresAt.getTime() <= Date.now()) {
+    await compareCode(code, DUMMY_CODE_HASH);
+    await recordFailedAttempt(normalizedEmail, "verify-reset-code");
+    return INVALID_CODE_RESPONSE;
+  }
+
+  // ---- Compare candidate code against bcrypt hash ----
+  const isValid = await compareCode(code, resetCode.codeHash);
+  if (!isValid) {
+    await recordFailedAttempt(normalizedEmail, "verify-reset-code");
+    return INVALID_CODE_RESPONSE;
+  }
 
   // ---- Success: code verified. Do NOT consume it and do NOT touch the
   // password — Step 3 consumes the token via /api/auth/reset-password. ----
   return NextResponse.json({
     success: true,
     message: "Code verified",
-    data: { flowId: validCode.id },
+    data: { flowId: resetCode.id },
   });
 }

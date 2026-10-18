@@ -33,9 +33,9 @@ import { validateCsrfToken } from "@/lib/csrf";
 import { checkRateLimit, recordFailedAttempt } from "@/lib/rate-limit";
 import {
   generateVerificationCode,
-  CODE_EXPIRY_MS,
   RESEND_COOLDOWN_MS,
 } from "@/lib/verification";
+import { VERIFICATION_CODE_TTL_MS } from "@/lib/auth-config";
 import { sendVerificationEmail } from "@/lib/email";
 
 // ===========================================================================
@@ -192,7 +192,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // ---- Generate new code ----
-  const { code, codeHash } = generateVerificationCode();
+  const { code, codeHash } = await generateVerificationCode();
 
   const newCooldownUntil = new Date(now.getTime() + RESEND_COOLDOWN_MS);
 
@@ -200,17 +200,21 @@ export async function POST(request: Request): Promise<NextResponse> {
     data: {
       userId: sessionData.user.id,
       codeHash,
-      expiresAt: new Date(now.getTime() + CODE_EXPIRY_MS),
+      expiresAt: new Date(now.getTime() + VERIFICATION_CODE_TTL_MS),
       resendCooldownUntil: newCooldownUntil,
     },
   });
 
   // ---- Send email ----
-  await sendVerificationEmail(
-    userEmail,
-    code,
-    sessionData.user.fullName
-  );
+  try {
+    await sendVerificationEmail(
+      userEmail,
+      code,
+      sessionData.user.fullName
+    );
+  } catch (error) {
+    console.error("Resend code: failed to send verification email:", error);
+  }
 
   return NextResponse.json({
     success: true,

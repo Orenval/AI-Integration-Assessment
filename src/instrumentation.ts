@@ -28,6 +28,7 @@ export async function register(): Promise<void> {
     if (process.env.NEXT_RUNTIME === "edge") return;
 
     const { cleanupExpiredResetTokens } = await import("@/lib/reset-code");
+    const { cleanupExpiredVerificationCodes } = await import("@/lib/verification");
 
     // Guard against re-registration (e.g. dev-mode restarts of instrumentation).
     if (globalForSweeper.resetTokenSweeperStarted) return;
@@ -63,14 +64,22 @@ export async function register(): Promise<void> {
 
     const timer = setInterval(async () => {
         try {
-            const deleted = await cleanupExpiredResetTokens();
-            if (deleted > 0) {
+            const [deletedReset, deletedVerification] = await Promise.all([
+                cleanupExpiredResetTokens(),
+                cleanupExpiredVerificationCodes(),
+            ]);
+            if (deletedReset > 0) {
                 console.log(
-                    `[auth-maintenance] deleted ${deleted} expired reset token(s)`
+                    `[auth-maintenance] deleted ${deletedReset} expired reset token(s)`
+                );
+            }
+            if (deletedVerification > 0) {
+                console.log(
+                    `[auth-maintenance] deleted ${deletedVerification} expired verification code(s)`
                 );
             }
         } catch (error) {
-            console.error("[auth-maintenance] reset token sweep failed:", error);
+            console.error("[auth-maintenance] token sweep failed:", error);
         }
     }, SWEEP_INTERVAL_MS);
 

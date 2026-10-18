@@ -36,7 +36,7 @@
 
 import bcrypt from "bcrypt";
 
-const COST_FACTOR = 10;
+export const COST_FACTOR = 10;
 
 /**
  * Hash a plaintext password using bcrypt with cost factor 10.

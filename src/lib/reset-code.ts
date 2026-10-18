@@ -5,33 +5,25 @@
 //
 // The password reset credential is a 6-digit numeric code — generated exactly
 // like the email verification code (crypto.randomBytes(32) reduced to 6 digits,
-// see src/lib/verification.ts). Only the SHA-256 hash is stored in the
+// see src/lib/verification.ts). Only the bcrypt hash is stored in the
 // database, so a database breach does not expose valid reset codes. The raw
 // code is sent to the user's email and never persisted.
 //
-// Code expiry: 1 hour. Long enough for a user to check their email and
-// complete the reset, but short enough to limit the attack window if the email
-// is compromised.
-//
-// Resend cooldown: 60 seconds, stored as resendCooldownUntil in the database
-// and enforced server-side (requesting a new code before the window elapses is
-// silently skipped — the response stays identical to preserve anti-enumeration).
-//
-// Max attempts: 5 wrong codes before the code is locked out (mirrors the email
-// verification flow).
+// Code expiry: 10 minutes (RESET_CODE_TTL_MS).
+// Resend cooldown: 60 seconds, stored as resendCooldownUntil in the database.
+// Max attempts: 5 wrong codes before the code is locked out.
 //
 // Single-use enforcement: The row is DELETED immediately when the code is
-// consumed (reset-password), matching the VerificationCode lifecycle. The
-// `usedAt` column is a deprecated soft-mark retained for schema stability; it
-// only ever holds a value on legacy rows. To prevent accumulation, expired,
+// consumed (reset-password), matching the VerificationCode lifecycle. Expired,
 // never-used rows are deleted by the per-user cleanup in forgot-password and by
 // the hourly sweeper registered in src/instrumentation.ts.
 
 import { prisma } from "./prisma";
-import { generateVerificationCode, hashCode } from "./verification";
+import { generateVerificationCode, hashCode, compareCode } from "./verification";
+import { RESET_CODE_TTL_MS } from "./auth-config";
 
 /** How long a password reset code remains valid (milliseconds). */
-export const RESET_CODE_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+export const RESET_CODE_EXPIRY_MS = RESET_CODE_TTL_MS;
 
 /** Minimum time between reset code requests (milliseconds). */
 export const RESET_RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
@@ -40,24 +32,33 @@ export const RESET_RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
 export const MAX_RESET_CODE_ATTEMPTS = 5;
 
 /**
- * Generate a 6-digit password reset code and its SHA-256 hash.
+ * Generate a 6-digit password reset code and its bcrypt hash.
  *
  * Reuses the exact generation strategy as the email verification code:
  * crypto.randomBytes(32) reduced mod 10^6, zero-padded to 6 digits.
  *
  * @returns An object with:
  *   - `code`: the 6-digit string (to be emailed to the user)
- *   - `codeHash`: the SHA-256 hex digest (to be stored in the database)
+ *   - `codeHash`: the bcrypt hash string (to be stored in the database)
  */
 export const generateResetCode = generateVerificationCode;
 
 /**
- * Hash a password reset code with SHA-256 for storage or comparison.
+ * Hash a password reset code with bcrypt for storage or comparison.
  *
  * @param code - The 6-digit code string.
- * @returns The SHA-256 hex digest.
+ * @returns The bcrypt hash string.
  */
 export const hashResetCode = hashCode;
+
+/**
+ * Compare a plaintext password reset code against a bcrypt hash.
+ *
+ * @param code - The candidate 6-digit code string.
+ * @param hash - The stored bcrypt hash.
+ * @returns true if the code matches, false otherwise.
+ */
+export const compareResetCode = compareCode;
 
 /**
  * Delete password reset tokens that expired without ever being used.

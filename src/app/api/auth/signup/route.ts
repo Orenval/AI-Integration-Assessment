@@ -15,15 +15,15 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { signUpSchema } from "@/lib/validation";
-import { hashPassword, verifyPassword } from "@/lib/password";
+import { hashPassword } from "@/lib/password";
 import { createSession } from "@/lib/session";
 import { validateCsrfToken } from "@/lib/csrf";
 import { checkRateLimit, recordFailedAttempt } from "@/lib/rate-limit";
 import {
   generateVerificationCode,
-  CODE_EXPIRY_MS,
   RESEND_COOLDOWN_MS,
 } from "@/lib/verification";
+import { VERIFICATION_CODE_TTL_MS } from "@/lib/auth-config";
 import { sendVerificationEmail } from "@/lib/email";
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -101,13 +101,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     // disabled from the moment that screen loads — no resend attempt needed.
     // See "Resend cooldown, enforced server-side" in src/lib/verification.ts.
     const now = new Date();
-    const { code, codeHash } = generateVerificationCode();
+    const { code, codeHash } = await generateVerificationCode();
 
     await prisma.verificationCode.create({
       data: {
         userId: user.id,
         codeHash,
-        expiresAt: new Date(now.getTime() + CODE_EXPIRY_MS),
+        expiresAt: new Date(now.getTime() + VERIFICATION_CODE_TTL_MS),
         resendCooldownUntil: new Date(now.getTime() + RESEND_COOLDOWN_MS),
       },
     });
@@ -164,44 +164,68 @@ export async function POST(request: Request): Promise<NextResponse> {
         where: { email: normalizedEmail },
       });
 
-      let passwordMatches = false;
       if (existingUser) {
-        passwordMatches = await verifyPassword(
-          password,
-          existingUser.passwordHash
-        );
-      }
+        // If the user exists but hasn't verified their email yet, allow them
+        // to complete verification: update credentials, issue a new code,
+        // and create an unverified session so they reach the verification screen.
+        if (!existingUser.emailVerified) {
+          await prisma.user.update({
+            where: { id: existingUser.id },
+            data: {
+              fullName: fullName.trim(),
+              passwordHash,
+            },
+          });
 
-      if (existingUser && passwordMatches) {
-        const now = new Date();
-        const { code, codeHash } = generateVerificationCode();
+          await prisma.verificationCode.deleteMany({
+            where: { userId: existingUser.id },
+          });
 
-        await prisma.verificationCode.create({
-          data: {
-            userId: existingUser.id,
-            codeHash,
-            expiresAt: new Date(now.getTime() + CODE_EXPIRY_MS),
-            resendCooldownUntil: new Date(now.getTime() + RESEND_COOLDOWN_MS),
+          const now = new Date();
+          const { code, codeHash } = await generateVerificationCode();
+
+          await prisma.verificationCode.create({
+            data: {
+              userId: existingUser.id,
+              codeHash,
+              expiresAt: new Date(now.getTime() + VERIFICATION_CODE_TTL_MS),
+              resendCooldownUntil: new Date(now.getTime() + RESEND_COOLDOWN_MS),
+            },
+          });
+
+          try {
+            await sendVerificationEmail(
+              normalizedEmail,
+              code,
+              fullName.trim()
+            );
+          } catch (err) {
+            console.error("Signup: failed to send verification email:", err);
+          }
+
+          await createSession(existingUser.id);
+
+          return NextResponse.json(
+            {
+              success: true,
+              message: "Account created. Please verify your email.",
+              data: { requiresVerification: true },
+            },
+            { status: 201 }
+          );
+        }
+
+        // If the user already has a verified account, inform them to sign in
+        return NextResponse.json(
+          {
+            success: false,
+            errors: {
+              email: ["An account with this email already exists. Please sign in."],
+            },
           },
-        });
-
-        await sendVerificationEmail(
-          normalizedEmail,
-          code,
-          existingUser.fullName
+          { status: 400 }
         );
-
-        await createSession(existingUser.id);
       }
-
-      return NextResponse.json(
-        {
-          success: true,
-          message: "Account created. Please verify your email.",
-          data: { requiresVerification: true },
-        },
-        { status: 201 }
-      );
     }
 
     console.error("Signup error:", error);

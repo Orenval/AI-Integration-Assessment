@@ -4,13 +4,19 @@
 // Requirements addressed:
 // - Req 11: Code expiry checked server-side against DB expiresAt
 // - Req 15: CSRF validation
+// - bcrypt comparison with atomic attempt reservation and lockout at 5 attempts
+// - Uniform timing via dummy hash comparison when row is inactive
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyEmailSchema } from "@/lib/validation";
 import { validateSession } from "@/lib/session";
 import { validateCsrfToken } from "@/lib/csrf";
-import { hashCode, MAX_CODE_ATTEMPTS } from "@/lib/verification";
+import {
+  compareCode,
+  DUMMY_CODE_HASH,
+  MAX_CODE_ATTEMPTS,
+} from "@/lib/verification";
 import { sendWelcomeEmail } from "@/lib/email";
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -77,14 +83,31 @@ export async function POST(request: Request): Promise<NextResponse> {
   });
 
   if (!verificationCode) {
+    await compareCode(code, DUMMY_CODE_HASH);
     return NextResponse.json(
       { success: false, message: "No pending verification code. Please request a new one." },
       { status: 400 }
     );
   }
 
+  const now = new Date();
+
+  // ---- Check expiry (Requirement 11) ----
+  if (verificationCode.expiresAt.getTime() <= now.getTime()) {
+    await compareCode(code, DUMMY_CODE_HASH);
+    return NextResponse.json(
+      {
+        success: false,
+        message: "That code has expired. Request a new one.",
+        expired: true,
+      },
+      { status: 400 }
+    );
+  }
+
   // ---- Check attempt lockout ----
   if (verificationCode.attemptCount >= MAX_CODE_ATTEMPTS) {
+    await compareCode(code, DUMMY_CODE_HASH);
     return NextResponse.json(
       {
         success: false,
@@ -94,29 +117,64 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  // ---- Check expiry (Requirement 11: DB-enforced, not just UI countdown) ----
-  const now = new Date();
-  if (verificationCode.expiresAt.getTime() < now.getTime()) {
+  // ---- Reserve an attempt before comparing (Step 3: atomic reservation) ----
+  const reserveResult = await prisma.verificationCode.updateMany({
+    where: {
+      id: verificationCode.id,
+      attemptCount: { lt: MAX_CODE_ATTEMPTS },
+      expiresAt: { gt: now },
+    },
+    data: {
+      attemptCount: { increment: 1 },
+    },
+  });
+
+  if (reserveResult.count === 0) {
+    const current = await prisma.verificationCode.findUnique({
+      where: { id: verificationCode.id },
+    });
+    if (!current || current.expiresAt.getTime() <= Date.now()) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "That code has expired. Request a new one.",
+          expired: true,
+        },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       {
         success: false,
-        message: "Verification code has expired. Please request a new one.",
+        message: "Too many incorrect attempts. Please request a new code.",
+      },
+      { status: 429 }
+    );
+  }
+
+  // ---- Check expiry again in code ----
+  if (verificationCode.expiresAt.getTime() <= Date.now()) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: "That code has expired. Request a new one.",
+        expired: true,
       },
       { status: 400 }
     );
   }
 
-  // ---- Compare code hashes ----
-  const submittedHash = hashCode(code);
-  if (submittedHash !== verificationCode.codeHash) {
-    // Increment attempt counter
-    await prisma.verificationCode.update({
+  // ---- Compare code hashes with bcrypt ----
+  const isValid = await compareCode(code, verificationCode.codeHash);
+  if (!isValid) {
+    const updatedCode = await prisma.verificationCode.findUnique({
       where: { id: verificationCode.id },
-      data: { attemptCount: { increment: 1 } },
+      select: { attemptCount: true },
     });
+    const currentAttempts =
+      updatedCode?.attemptCount ?? (verificationCode.attemptCount + 1);
+    const remainingAttempts = Math.max(0, MAX_CODE_ATTEMPTS - currentAttempts);
 
-    const remainingAttempts =
-      MAX_CODE_ATTEMPTS - (verificationCode.attemptCount + 1);
     return NextResponse.json(
       {
         success: false,
@@ -126,8 +184,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  // ---- Success: delete the verification code (it is temporary data that must
-  // be removed once the email is verified) and mark the user verified ----
+  // ---- Success: delete the verification code and mark user verified ----
   await prisma.$transaction([
     prisma.verificationCode.delete({
       where: { id: verificationCode.id },
@@ -138,9 +195,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }),
   ]);
 
-  // ---- Send welcome email — ONLY now, after the server has confirmed the
-  // email was verified (account exists, code valid, record deleted) ----
-  // A delivery failure is logged but must never break the verification flow.
+  // ---- Send welcome email ----
   try {
     await sendWelcomeEmail(
       sessionData.user.email,
