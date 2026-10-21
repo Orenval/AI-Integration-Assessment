@@ -71,7 +71,7 @@ model VerificationCode {
   id                  String    @id @default(cuid())
   userId              String
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // sha256 of the 6-digit code derived from crypto.randomBytes(32).
+  // bcrypt hash (cost factor 10) of the 6-digit code derived from crypto.randomBytes(32).
   // The raw code is never persisted. See src/lib/verification.ts.
   codeHash            String
   // Database-enforced expiry — the UI countdown is cosmetic only.
@@ -94,7 +94,7 @@ model VerificationCode {
 // PasswordResetToken — single-use, time-limited password reset CODE
 // Requirement 12: The reset credential is now a 6-digit numeric code (matching
 // the email-verification pattern) instead of a token embedded in a clicked URL.
-// Only the SHA-256 hash of the code is stored; the raw code is never persisted.
+// Only the bcrypt hash of the code is stored; the raw code is never persisted.
 // Single-use is enforced by DELETING the row on successful use; expiry via
 // expiresAt; a 60s resend
 // cooldown via resendCooldownUntil (server-enforced); and a max-attempt
@@ -104,11 +104,11 @@ model PasswordResetToken {
   id                  String    @id @default(cuid())
   userId              String
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // sha256 of the 6-digit code derived from crypto.randomBytes(32).
+  // bcrypt hash (cost factor 10) of the 6-digit code derived from crypto.randomBytes(32).
   // Deliberately NOT unique: two users can coincidentally draw the same 6-digit
   // number; the hash is scoped to the user via the (userId) index below.
   codeHash            String
-  // Database-enforced expiry — reset codes expire after 1 hour.
+  // Database-enforced expiry — reset codes expire after 10 minutes (RESET_CODE_TTL_MS).
   expiresAt           DateTime
   // DEPRECATED soft-mark: rows are now DELETED once the code is consumed
   // (reset-password) or superseded/expired (forgot-password). This column is
@@ -155,17 +155,17 @@ model Job {
 
 // -----------------------------------------------------------------------------
 // RateLimitAttempt — per-identifier, per-route, exponential backoff
-// Applied to signin, signup, forgot-password, resend-code, upload, expand.
+// Applied to signin, signup, forgot-password, resend-code (auth routes).
 // -----------------------------------------------------------------------------
 model RateLimitAttempt {
   id           String    @id @default(cuid())
   // Scoped identifier: email address or IP, depending on the route.
   identifier   String
-  // Route key: "signin", "signup", "forgot-password", "resend", "upload", "expand".
+  // Route key: "signin", "signup", "forgot-password", "resend".
   route        String
   attemptCount Int       @default(1)
   // Null = not locked. Non-null = locked until this timestamp.
-  // Backoff curve: 2^(attemptCount - 1) minutes, capped at 60 minutes.
+  // Backoff curve: 2 free attempts, then 2^(attemptCount - 3) minutes, capped at 60 minutes.
   lockedUntil  DateTime?
   windowStart  DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -173,4 +173,19 @@ model RateLimitAttempt {
   // Ensures one record per (identifier, route) pair so upserts are atomic.
   @@unique([identifier, route])
 }
+
+// -----------------------------------------------------------------------------
+// ApiRequestLog — sliding window rate limiting for AI endpoints
+// Tracks request volume per user & route across rolling time windows
+// -----------------------------------------------------------------------------
+model ApiRequestLog {
+  id        String   @id @default(cuid())
+  userId    String
+  route     String   // "upload" | "expand"
+  createdAt DateTime @default(now())
+
+  @@index([userId, route, createdAt])
+  @@index([createdAt])
+}
+
 

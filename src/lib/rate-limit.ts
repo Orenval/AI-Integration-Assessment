@@ -6,9 +6,9 @@
 // window increases exponentially: 1min → 2min → 4min → 8min → 16min → 32min →
 // 60min (capped).
 //
-// The backoff curve is 2^(attemptCount - 1) minutes, capped at 60 minutes.
+// The backoff curve gives 2 free attempts, then 2^(attemptCount - 3) minutes, capped at 60 minutes.
 // This balances user friction (a single typo causes only a 1-minute lockout
-// after 3 attempts) against brute-force deterrence (10 consecutive failures
+// on the 3rd attempt: 2^(3-3) = 1 min) against brute-force deterrence (10 consecutive failures
 // produce a 1-hour lockout).
 //
 // Why database-backed instead of in-memory (e.g. a Map or Redis)?

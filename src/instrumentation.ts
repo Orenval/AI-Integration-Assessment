@@ -29,6 +29,7 @@ export async function register(): Promise<void> {
 
     const { cleanupExpiredResetTokens } = await import("@/lib/reset-code");
     const { cleanupExpiredVerificationCodes } = await import("@/lib/verification");
+    const { cleanupExpiredApiRequestLogs } = await import("@/lib/sliding-rate-limit");
 
     // Guard against re-registration (e.g. dev-mode restarts of instrumentation).
     if (globalForSweeper.resetTokenSweeperStarted) return;
@@ -64,9 +65,10 @@ export async function register(): Promise<void> {
 
     const timer = setInterval(async () => {
         try {
-            const [deletedReset, deletedVerification] = await Promise.all([
+            const [deletedReset, deletedVerification, deletedApiLogs] = await Promise.all([
                 cleanupExpiredResetTokens(),
                 cleanupExpiredVerificationCodes(),
+                cleanupExpiredApiRequestLogs(),
             ]);
             if (deletedReset > 0) {
                 console.log(
@@ -76,6 +78,11 @@ export async function register(): Promise<void> {
             if (deletedVerification > 0) {
                 console.log(
                     `[auth-maintenance] deleted ${deletedVerification} expired verification code(s)`
+                );
+            }
+            if (deletedApiLogs > 0) {
+                console.log(
+                    `[rate-limit-maintenance] deleted ${deletedApiLogs} expired API request log(s)`
                 );
             }
         } catch (error) {

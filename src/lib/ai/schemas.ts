@@ -27,7 +27,7 @@ export const extractionResultSchema = z.object({
     )
     .min(1, 'At least 1 tag is required')
     .max(10, 'At most 10 tags allowed'),
-});
+})
 
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;
 

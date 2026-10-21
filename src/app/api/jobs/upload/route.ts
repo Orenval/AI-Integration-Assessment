@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { validateSession } from '@/lib/session';
 import { validateCsrfToken } from '@/lib/csrf';
-import { checkRateLimit, recordFailedAttempt, resetRateLimit } from '@/lib/rate-limit';
+import { checkSlidingRateLimit } from '@/lib/sliding-rate-limit';
 import { UPLOAD_LIMITS } from '@/lib/ai/config';
 import { generateStorageKey, putObject, deleteObject } from '@/lib/storage/r2';
 import { enqueueJob } from '@/lib/jobs/queue';
@@ -54,20 +54,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  // 3. Rate limit check
-  const rateLimit = await checkRateLimit(auth.session.userId, 'upload');
+  // 3. Rate limit check (Sliding Window: 10 requests per 10 minutes)
+  const rateLimit = await checkSlidingRateLimit(auth.session.userId, 'upload');
   if (!rateLimit.allowed) {
     return NextResponse.json(
       {
         success: false,
         message: 'Too many upload requests. Please try again later.',
-        retryAfter: rateLimit.retryAfter,
+        retryAfter: rateLimit.retryAfterSeconds,
       },
       {
         status: 429,
-        headers: {
-          'Retry-After': String(rateLimit.retryAfter),
-        },
+        headers: rateLimit.headers,
       }
     );
   }
@@ -208,21 +206,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
-  // If every file was rejected, return 400 and record failure for rate limiting
+  // If every file was rejected, return 400
   if (createdJobs.length === 0) {
-    await recordFailedAttempt(auth.session.userId, 'upload');
     return NextResponse.json(
       {
         success: false,
         message: 'All uploaded files were rejected.',
         rejected: rejectedFiles,
       },
-      { status: 400 }
+      { status: 400, headers: rateLimit.headers }
     );
   }
-
-  // At least one valid file: clear failed rate-limit attempts and return 201
-  await resetRateLimit(auth.session.userId, 'upload');
 
   return NextResponse.json(
     {
@@ -230,6 +224,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       jobs: createdJobs,
       rejected: rejectedFiles,
     },
-    { status: 201 }
+    {
+      status: 201,
+      headers: rateLimit.headers,
+    }
   );
 }

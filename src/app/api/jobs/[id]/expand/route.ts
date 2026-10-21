@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { validateSession } from '@/lib/session';
 import { validateCsrfToken } from '@/lib/csrf';
-import { checkRateLimit, recordFailedAttempt, resetRateLimit } from '@/lib/rate-limit';
+import { checkSlidingRateLimit } from '@/lib/sliding-rate-limit';
 import prisma from '@/lib/prisma';
 import { expandListing } from '@/lib/ai/gemini';
 import { extractionResultSchema } from '@/lib/ai/schemas';
@@ -46,27 +46,9 @@ export async function POST(
     );
   }
 
-  // 3. Rate limit check
-  const rateLimit = await checkRateLimit(auth.session.userId, 'expand');
-  if (!rateLimit.allowed) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: 'Too many expand requests. Please try again later.',
-        retryAfter: rateLimit.retryAfter,
-      },
-      {
-        status: 429,
-        headers: {
-          'Retry-After': String(rateLimit.retryAfter),
-        },
-      }
-    );
-  }
-
   const { id } = await context.params;
 
-  // 4. Scoped query
+  // 3. Scoped query
   const job = await prisma.job.findFirst({
     where: {
       id,
@@ -88,7 +70,7 @@ export async function POST(
     );
   }
 
-  // Idempotency: If already expanded, return cached result immediately without calling Gemini
+  // Idempotency: If already expanded, return cached result immediately without consuming rate limit or calling Gemini
   if (job.expandedResult) {
     return NextResponse.json({
       success: true,
@@ -96,12 +78,28 @@ export async function POST(
     });
   }
 
-  // In-flight concurrency gate per Job ID
+  // 4. Rate limit check (Sliding Window: 20 requests per 10 minutes)
+  const rateLimit = await checkSlidingRateLimit(auth.session.userId, 'expand');
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: 'Too many expand requests. Please try again later.',
+        retryAfter: rateLimit.retryAfterSeconds,
+      },
+      {
+        status: 429,
+        headers: rateLimit.headers,
+      }
+    );
+  }
+
+  // 5. In-flight concurrency gate per Job ID
   const inFlight = getInFlightExpands();
   if (inFlight.has(id)) {
     return NextResponse.json(
       { success: false, message: 'Expansion is already running for this job' },
-      { status: 409 }
+      { status: 409, headers: rateLimit.headers }
     );
   }
 
@@ -110,10 +108,9 @@ export async function POST(
   try {
     const validatedData = extractionResultSchema.safeParse(job.result);
     if (!validatedData.success) {
-      await recordFailedAttempt(auth.session.userId, 'expand');
       return NextResponse.json(
         { success: false, message: 'Job structured data is invalid for expansion' },
-        { status: 400 }
+        { status: 400, headers: rateLimit.headers }
       );
     }
 
@@ -127,15 +124,17 @@ export async function POST(
       },
     });
 
-    await resetRateLimit(auth.session.userId, 'expand');
-
-    return NextResponse.json({
-      success: true,
-      expandedResult: expandedText,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        expandedResult: expandedText,
+      },
+      {
+        headers: rateLimit.headers,
+      }
+    );
   } catch (error) {
     console.error(`[expand] Error expanding job ${id}:`, error);
-    await recordFailedAttempt(auth.session.userId, 'expand');
 
     if (error instanceof ProviderTimeoutError) {
       return NextResponse.json(
@@ -143,7 +142,7 @@ export async function POST(
           success: false,
           message: 'The AI service timed out while generating the expanded listing.',
         },
-        { status: 504 }
+        { status: 504, headers: rateLimit.headers }
       );
     }
 
@@ -152,7 +151,7 @@ export async function POST(
         success: false,
         message: 'The AI service failed to generate the expanded listing.',
       },
-      { status: 502 }
+      { status: 502, headers: rateLimit.headers }
     );
   } finally {
     inFlight.delete(id);
