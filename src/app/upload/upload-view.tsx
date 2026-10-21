@@ -73,6 +73,7 @@ export function UploadView({ user }: UploadViewProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [previewUrls, setPreviewUrls] = useState<{ key: string; name: string; url: string }[]>([]);
+  const [isListingsExpanded, setIsListingsExpanded] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isPollingRef = useRef(false);
@@ -128,6 +129,10 @@ export function UploadView({ user }: UploadViewProps) {
 
   // Polling condition: active only when at least one job is pending or processing
   const hasActiveJobs = jobs.some((j) => j.status === 'pending' || j.status === 'processing');
+
+  const COLLAPSED_LISTINGS_LIMIT = 5;
+  const visibleJobs = isListingsExpanded ? jobs : jobs.slice(0, COLLAPSED_LISTINGS_LIMIT);
+  const hasMoreListings = jobs.length > COLLAPSED_LISTINGS_LIMIT;
 
   useEffect(() => {
     if (!hasActiveJobs) return;
@@ -318,7 +323,7 @@ export function UploadView({ user }: UploadViewProps) {
         {/* Header Title */}
         <div style={{ marginBottom: '32px' }}>
           <h1 style={{ fontSize: '28px', fontWeight: 700, letterSpacing: '-0.02em', color: '#0f172a', marginBottom: '8px' }}>
-            Upload product photos
+            Turn photos into listings
           </h1>
 
         </div>
@@ -335,14 +340,8 @@ export function UploadView({ user }: UploadViewProps) {
           }}
         >
           <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#0f172a', marginBottom: '4px' }}>
-            Upload photos
+            New listings
           </h2>
-          <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, marginBottom: '12px' }}>
-            {UPLOAD_LIMITS.allowedMimeTypes.includes('image/jpeg') && UPLOAD_LIMITS.allowedMimeTypes.includes('image/png')
-              ? 'JPEG or PNG'
-              : UPLOAD_LIMITS.allowedMimeTypes.map((type) => type.replace('image/', '').toUpperCase()).join(' or ')}
-            , up to {(UPLOAD_LIMITS.maxFileSizeBytes / (1024 * 1024)).toFixed(0)}MB each, up to {UPLOAD_LIMITS.maxFilesPerUpload} photos.
-          </p>
 
           <form onSubmit={handleUploadSubmit} noValidate>
             <input
@@ -455,10 +454,13 @@ export function UploadView({ user }: UploadViewProps) {
                   </span>
 
                   <span style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b' }}>
-                    Drop photos here, or click to choose
+                    Drop photos or click to browse
                   </span>
                   <span style={{ fontSize: '13px', color: '#475569' }}>
-                    Pick one or many. We write a listing for each photo.
+                    {UPLOAD_LIMITS.allowedMimeTypes.includes('image/jpeg') && UPLOAD_LIMITS.allowedMimeTypes.includes('image/png')
+                      ? 'JPEG or PNG'
+                      : UPLOAD_LIMITS.allowedMimeTypes.map((type) => type.replace('image/', '').toUpperCase()).join(' or ')}
+                    {`. Max ${(UPLOAD_LIMITS.maxFileSizeBytes / (1024 * 1024)).toFixed(0)}MB each. Up to ${UPLOAD_LIMITS.maxFilesPerUpload} photos.`}
                   </span>
                 </>
               )}
@@ -649,7 +651,7 @@ export function UploadView({ user }: UploadViewProps) {
                   transition: 'background-color 0.15s ease',
                 }}
               >
-                {isUploading ? 'Processing...' : 'Process'}
+                {isUploading ? 'Processing...' : 'Generate listings'}
               </button>
             </div>
           </form>
@@ -668,9 +670,27 @@ export function UploadView({ user }: UploadViewProps) {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <div>
-              <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
-                Your recent uploads
-              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
+                  Your listings
+                </h2>
+                {jobs.length > 0 && (
+                  <span
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: '#475569',
+                      backgroundColor: '#f1f5f9',
+                      padding: '2px 8px',
+                      borderRadius: '9999px',
+                    }}
+                  >
+                    {!isListingsExpanded && hasMoreListings
+                      ? `5 of ${jobs.length}`
+                      : `${jobs.length}`}
+                  </span>
+                )}
+              </div>
               {hasActiveJobs && (
                 <span style={{ fontSize: '13px', color: '#2563eb', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
                   <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
@@ -694,7 +714,7 @@ export function UploadView({ user }: UploadViewProps) {
                 cursor: isRefreshing ? 'not-allowed' : 'pointer',
               }}
             >
-              {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              {isRefreshing ? 'Refreshing...' : 'Update status'}
             </button>
           </div>
 
@@ -721,14 +741,15 @@ export function UploadView({ user }: UploadViewProps) {
             >
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>📷</div>
                 <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                  No uploads yet
+                  No listings yet
                 </h3>
                 <p style={{ fontSize: '14px', color: '#475569' }}>
-                  Choose a photo above to get started.
+                  Upload a photo to create your first listing.
                 </p>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <>
+              <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
@@ -739,7 +760,7 @@ export function UploadView({ user }: UploadViewProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {jobs.map((job) => {
+                  {visibleJobs.map((job) => {
                     return (
                       <tr
                         key={job.id}
@@ -840,7 +861,85 @@ export function UploadView({ user }: UploadViewProps) {
                 </tbody>
               </table>
             </div>
-          )}
+
+            {hasMoreListings && (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  paddingTop: '16px',
+                  marginTop: '12px',
+                  borderTop: '1px solid #f1f5f9',
+                }}
+              >
+                <button
+                  id="toggle-listings-expand"
+                  type="button"
+                  onClick={() => setIsListingsExpanded((prev) => !prev)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '13.5px',
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#eff6ff';
+                    e.currentTarget.style.color = '#1d4ed8';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.color = '#2563eb';
+                  }}
+                >
+                  {isListingsExpanded ? (
+                    <>
+                      <span>See less</span>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="m18 15-6-6-6 6" />
+                      </svg>
+                    </>
+                  ) : (
+                    <>
+                      <span>See more ({jobs.length - COLLAPSED_LISTINGS_LIMIT} more)</span>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="m6 9 6 6 6-6" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </>
+        )}
         </section>
       </main>
     </div>
