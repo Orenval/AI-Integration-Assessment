@@ -41,7 +41,7 @@ The app is a focused slice built on an existing authentication system:
 | Validation | Zod `4` |
 | Password hashing | `bcrypt` (cost factor 10) |
 | Email | `nodemailer` (SMTP) |
-| AI provider | `@google/genai` — Gemini `gemini-2.5-flash` |
+| AI provider | `@google/genai` — Gemini `gemini-3.1-flash-lite` |
 | Object storage | Cloudflare R2 via `@aws-sdk/client-s3` |
 | Concurrency | `p-limit` (in-memory queue) |
 
@@ -85,129 +85,369 @@ prisma/
 
 ---
 
-## 4. Getting Started
+## 4. How to Run This Project
 
 ### Prerequisites
 
-- Node.js (a version compatible with Next.js 16 / React 19)
-- A PostgreSQL database
-- A Gemini API key
-- A Cloudflare R2 bucket + credentials (or an S3-compatible bucket)
-- SMTP credentials for outbound email (Ethereal/Mailtrap are fine locally)
+Ensure the following tools, services, and credentials are ready before running the project:
 
-### Setup
+- **Node.js**: `v20.x` or newer (developed and validated on Node.js `v24.16.0`).
+- **Package Manager**: `npm` (bundled with Node.js).
+- **PostgreSQL Database**: PostgreSQL 14+ running locally (e.g. `localhost:5432`) or hosted remotely (Neon, Supabase, RDS).
+- **Google Gemini API Key**: API key configured for Google GenAI Studio (`gemini-3.1-flash-lite`).
+- **Cloudflare R2 Object Storage**: Cloudflare account with an R2 bucket and an API token (Account ID, Access Key ID, Secret Access Key).
+- **SMTP Service**: Transactional email credentials for 6-digit email OTP delivery (Gmail SMTP with App Password, Ethereal, Mailtrap, or Sendgrid).
 
-1. Install dependencies:
+---
 
-   ```bash
-   npm install
-   ```
+### Step-by-Step Setup Guide
 
-2. Create your environment file:
+#### Step 1: Clone & Install Dependencies
+Install all production dependencies and TypeScript development tools:
 
-   ```bash
-   copy .env.example .env      # Windows
-   # cp .env.example .env       # macOS/Linux
-   ```
+```bash
+npm install
+```
 
-   Fill in every value (see [Section 5](#5-environment-variables)). The Gemini
-   key and R2 credentials are entered by hand — never commit a real `.env`.
+#### Step 2: Configure Environment Variables
+Create your local environment file by copying `.env.example`:
 
-3. Apply database migrations (Prisma):
+```bash
+# Windows (PowerShell or CMD)
+copy .env.example .env
 
-   ```bash
-   npx prisma migrate deploy   # or: npx prisma migrate dev
-   npx prisma generate
-   ```
+# macOS / Linux
+cp .env.example .env
+```
 
-4. Start the dev server:
+Open `.env` and fill in all required secrets (see [Section 5](#5-environment-variables) for detailed descriptions):
+- Provide your database connection string in `DATABASE_URL`.
+- Generate secure 64-character hexadecimal values for `SESSION_SECRET` and `CSRF_SECRET`:
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ```
+- Enter your `GEMINI_API_KEY`.
+- Enter your Cloudflare R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`).
+- Enter your SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`).
 
-   ```bash
-   npm run dev
-   ```
+> **Security Note:** Never commit your `.env` file to version control. The repository's `.gitignore` automatically excludes `.env`.
 
-5. Open http://localhost:3000 — you will be redirected to `/signin`.
+#### Step 3: Initialize Database Schema & Prisma Client
+Synchronize the Prisma schema with your PostgreSQL database and generate the client bindings:
 
-### npm scripts
+```bash
+# Push schema structure, tables, indexes, and constraints to PostgreSQL
+npx prisma db push
+
+# Generate typed Prisma client in node_modules/@prisma/client
+npx prisma generate
+```
+
+*(Alternatively, run `npx prisma migrate deploy` if deploying against formal SQL migrations in CI/CD).*
+
+#### Step 4: Run the Development Server
+Start the Next.js development server with Turbopack:
+
+```bash
+npm run dev
+```
+
+Access the application in your browser at [http://localhost:3000](http://localhost:3000).
+
+#### Step 5: Build and Run in Production
+To validate and run an optimized production build:
+
+```bash
+# 1. Type check
+npx tsc --noEmit
+
+# 2. Lint check
+npm run lint
+
+# 3. Compile optimized production bundle
+npm run build
+
+# 4. Start production server
+npm run start
+```
+
+#### Step 6: End-to-End Verification Checklist
+1. Visit `http://localhost:3000` — unauthenticated users are redirected to `/signin`.
+2. Click **Create account** (`/signup`), fill out the registration form, and submit.
+3. Retrieve your 6-digit verification code from your inbox (or check terminal stdout if local) and submit it on `/verify-email`.
+4. Once verified, you land on `/dashboard`. Click **Upload Photos** (or visit `/upload`).
+5. Drag and drop or browse 1–10 JPEG/PNG photos (≤5MB each). Notice the instant local client-side preview thumbnails.
+6. Click **Upload and process**. The form submits immediately (`201 Created`), returns job IDs, and adds the jobs to the "Recent Processing Jobs" table.
+7. Observe the adaptive polling engine: status badges transition from `Waiting` (`pending`) → `Working` (`processing`) → `Done` (`done`).
+8. Notice that polling halts automatically as soon as all jobs finish.
+9. Click any completed job card to view `/jobs/[id]`.
+10. Click **Expand description** to run the on-demand Gemini listing generation and view the completed marketing prose.
+
+---
+
+### npm Scripts
 
 | Script | Purpose |
 |---|---|
-| `npm run dev` | Start the development server |
-| `npm run build` | Production build |
-| `npm run start` | Serve the production build |
-| `npm run lint` | Run ESLint |
-| `npm run lint:fix` | Run ESLint with autofix |
-
-> There is no automated test runner configured. Verify changes with `npx tsc --noEmit`, `npm run lint`, and manual end-to-end testing.
+| `npm run dev` | Start development server with Turbopack |
+| `npm run build` | Compile optimized production build |
+| `npm run start` | Serve production build |
+| `npm run lint` | Run ESLint across all files |
+| `npm run lint:fix` | Run ESLint with automatic fixes |
 
 ---
 
 ## 5. Environment Variables
 
-| Variable | Required | Description |
-|---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `SMTP_HOST` | Yes | SMTP host for transactional email |
-| `SMTP_PORT` | Yes | SMTP port (`465` = SSL, otherwise STARTTLS) |
-| `SMTP_USER` | Yes | SMTP username |
-| `SMTP_PASS` | Yes | SMTP password |
-| `SMTP_FROM` | No | From header (defaults to a local placeholder) |
-| `SESSION_SECRET` | Yes | Secret for session-token derivation |
-| `CSRF_SECRET` | Yes | Secret for CSRF token generation |
-| `NEXT_PUBLIC_APP_URL` | Yes | Public base URL of the app |
-| `GEMINI_API_KEY` | Yes | Google Gemini API key |
-| `R2_ACCOUNT_ID` | Yes | Cloudflare R2 account ID |
-| `R2_ACCESS_KEY_ID` | Yes | R2/S3 access key |
-| `R2_SECRET_ACCESS_KEY` | Yes | R2/S3 secret key |
-| `R2_BUCKET_NAME` | Yes | R2 bucket name |
+| Variable | Required | Description | Example / Notes |
+|---|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string | `postgresql://postgres:password@localhost:5432/ai_integration_assessment?schema=public` |
+| `SMTP_HOST` | Yes | SMTP host for transactional email | `smtp.gmail.com` or `smtp.mailtrap.io` |
+| `SMTP_PORT` | Yes | SMTP port | `465` (SSL) or `587` (STARTTLS) |
+| `SMTP_USER` | Yes | SMTP username | Account email or API user |
+| `SMTP_PASS` | Yes | SMTP password | App Password (Gmail) or SMTP token |
+| `SMTP_FROM` | No | Sender From header | `AI Assessment <noreply@example.com>` |
+| `SESSION_SECRET` | Yes | 32-byte secret for session token derivation | 64-char hex string from `crypto.randomBytes(32)` |
+| `CSRF_SECRET` | Yes | 32-byte secret for CSRF token generation | 64-char hex string from `crypto.randomBytes(32)` |
+| `NEXT_PUBLIC_APP_URL` | Yes | Public URL of the app | `http://localhost:3000` |
+| `GEMINI_API_KEY` | Yes | Google Gemini API key | From Google AI Studio |
+| `R2_ACCOUNT_ID` | Yes | Cloudflare account ID | Cloudflare dashboard → R2 overview |
+| `R2_ACCESS_KEY_ID` | Yes | S3/R2 access key ID | R2 Manage API Tokens |
+| `R2_SECRET_ACCESS_KEY` | Yes | S3/R2 secret access key | R2 Manage API Tokens |
+| `R2_BUCKET_NAME` | Yes | Cloudflare R2 bucket name | Target bucket name |
 
-Generate secrets with:
+---
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+## 6. End-to-End Application Flow & Polling Architecture
+
+### Complete System Execution Flow
+
+```
+[User Browser]
+      │
+      ├─ 1. Authentication & Session Initialization
+      │       ├── User registers at /signup -> 6-digit code sent via SMTP
+      │       ├── Enters OTP at /verify-email -> User.emailVerified set to true
+      │       └── Session created -> HttpOnly cookie (session_token) + non-HttpOnly double-submit CSRF cookie (csrf_token)
+      │
+      ├─ 2. Photo Selection & Pre-Flight Validation (/upload)
+      │       ├── User selects 1–10 images (JPEG/PNG, ≤5MB each)
+      │       └── Client validates constraints & renders instant previews via URL.createObjectURL()
+      │
+      ├─ 3. Upload Submission (POST /api/jobs/upload)
+      │       ├── Validates session cookie & x-csrf-token header
+      │       ├── Checks sliding-window rate limit (10 requests / 10 min window)
+      │       ├── Inspects binary magic bytes (JPEG: FF D8 FF / PNG: 89 50 4E 47 0D 0A 1A 0A)
+      │       ├── Streams binary image buffer to Cloudflare R2 (uploads/<userId>/<uuid>.<ext>)
+      │       ├── Creates Job record in PostgreSQL (status: "pending", stores storageKey only)
+      │       ├── Hands job to in-memory queue: enqueueJob(job.id)
+      │       └── Returns HTTP 201 Created immediately with job summaries (non-blocking)
+      │
+      ├─ 4. Background Asynchronous Processing (src/lib/jobs/process-job.ts)
+      │       ├── Queue concurrency gate (p-limit, MAX_CONCURRENT_JOBS = 2)
+      │       ├── Atomic claim: UPDATE Job SET status="processing" WHERE status="pending"
+      │       ├── Retrieves image buffer from Cloudflare R2
+      │       ├── Calls Gemini 3.1 Flash Lite with EXTRACTION_SYSTEM_PROMPT & JSON schema
+      │       ├── Validates output against Zod extractionResultSchema (title, description, category, tags)
+      │       ├── Retry loop on transient/timeout errors (up to 3 attempts, backoff [1s, 3s])
+      │       ├── Persists result & rawModelOutput JSON on Job row
+      │       └── Sets Job status to "done" (or "failed" with user-safe errorMessage)
+      │
+      ├─ 5. Frontend Adaptive Status Polling (GET /api/jobs)
+      │       ├── Polls every 2000 ms (2 seconds) while active jobs exist
+      │       └── STOPS when every job reaches a terminal state ("done" or "failed") or component unmounts
+      │
+      └─ 6. On-Demand Expand Action (POST /api/jobs/[id]/expand)
+              ├── User clicks "Expand description" on /jobs/[id]
+              ├── Validates session, CSRF, and checks idempotency (returns cached if already expanded)
+              ├── Checks sliding-window rate limit (20 requests / 10 min window)
+              ├── Concurrency lock per job ID (409 Conflict if duplicate request in flight)
+              ├── Calls Gemini with EXPANSION_SYSTEM_PROMPT & structured data
+              ├── Persists natural-language listing in Job.expandedResult
+              └── Returns HTTP 200 with expanded prose to UI
 ```
 
 ---
 
-## 6. Data Model
+### Frontend Polling Lifecycle, Interval & Termination Point
 
-Defined in [`prisma/schema.prisma`](prisma/schema.prisma).
+The upload view ([`src/app/upload/upload-view.tsx`](src/app/upload/upload-view.tsx)) manages asynchronous job status updates using a client-side polling engine:
 
-### `User`
-Core identity record. Unique `email` (DB-level constraint prevents duplicate
-accounts), `passwordHash` (bcrypt), `emailVerified`, timestamps.
+1. **Polled Endpoint**:
+   - `GET /api/jobs`: Returns the authenticated user's latest 20 jobs sorted by `createdAt: "desc"`. Each item includes `id`, `status`, `attempts`, `errorMessage`, `originalFileName`, `createdAt`, and `resultTitle`.
 
-### `Session`
-Server-side session. Stores `sessionTokenHash` (SHA-256 of the raw cookie token),
-`lastActivityAt` (idle timeout), `expiresAt` (absolute timeout), and
-`invalidatedAt` (set on sign-out). Relation to `User` with cascade delete.
+2. **Polling Interval**:
+   - **Exactly 2,000 milliseconds (2 seconds)** via React `useEffect` and browser `setInterval()`.
+   - **Overlap / Stacking Guard (`isPollingRef.current`)**: Before issuing a network fetch, `isPollingRef.current` is inspected. If a previous request is still in flight (e.g. during temporary network latency), subsequent ticks are dropped. This prevents network congestion and socket exhaustion.
 
-### `VerificationCode`
-Email-verification record: `codeHash` (bcrypt cost factor 10), `expiresAt` (60 s,
-governed by `VERIFICATION_CODE_TTL_MS`), `resendCooldownUntil` (60 s server-enforced),
-`attemptCount` (lockout at 5, atomic increment-before-compare). Rows are **deleted**
-on success/supersede rather than soft-marked; expired rows are swept by the hourly sweeper.
+3. **Active Polling Condition**:
+   - Polling runs if and only if at least one job in the client state is actively executing:
+     ```typescript
+     const hasActiveJobs = jobs.some(
+       (j) => j.status === 'pending' || j.status === 'processing'
+     );
+     ```
 
-### `PasswordResetToken`
-Single-use, time-limited reset code: `codeHash` (bcrypt cost factor 10), `expiresAt`
-(10 min, governed by `RESET_CODE_TTL_MS`), `resendCooldownUntil`, `attemptCount`
-(lockout at 5, atomic increment-before-compare). Deleted on consumption; expired,
-never-used rows are cleaned up per-user and by an hourly sweeper.
-
-### `Job`
-Unit of AI work: `status` (`pending` | `processing` | `done` | `failed`),
-`attempts`, `errorMessage`, `storageKey` (R2 key — **never the file**),
-`originalFileName`, `fileSize`, `mimeType`, `rawModelOutput` (raw Gemini
-response), `result` (validated structured JSON), `expandedResult` (long listing
-text).
-
-### `RateLimitAttempt`
-Per `(identifier, route)` record with `attemptCount`, `lockedUntil`, and
-`windowStart`. Unique on `(identifier, route)` for atomic upserts.
+4. **Point Where Polling Stops (Termination Conditions)**:
+   - **Condition 1 — Terminal State Resolution**: As soon as every job in the list resolves to a terminal state (`status === 'done'` or `status === 'failed'`), `hasActiveJobs` evaluates to `false`. React tears down the effect and calls `clearInterval(intervalId)`. All polling halts immediately.
+   - **Condition 2 — Component Unmount / Navigation**: When the user navigates away from `/upload` (such as clicking a completed job card to view `/jobs/[id]`, returning to `/dashboard`, or signing out), the `useEffect` cleanup function immediately fires `clearInterval(intervalId)`, eliminating orphaned background network timers.
+   - **Condition 3 — Tab Teardown**: Closing or refreshing the page terminates the active browser timer.
 
 ---
 
-## 7. API Reference
+## 7. Data Model, Auth Table Blocks & Constraints
+
+Defined in [`prisma/schema.prisma`](prisma/schema.prisma) and enforced via PostgreSQL relational constraints, indexes, and application-level security invariants.
+
+### Table Blocks
+
+#### Auth Table Block
+
+1. **`User` (Identity Root)**
+   - `id`: `String` (CUID, Primary Key)
+   - `fullName`: `String` (User's display name)
+   - `email`: `String` (Unique email address)
+   - `passwordHash`: `String` (bcrypt hash with embedded salt, cost factor 10)
+   - `emailVerified`: `Boolean` (Default `false`; set `true` upon 6-digit OTP code verification)
+   - `createdAt`: `DateTime` (Default `now()`)
+   - `updatedAt`: `DateTime` (Automatic timestamp on modification)
+   - *Relations*: Cascading 1-to-many relations with `Session`, `VerificationCode`, `PasswordResetToken`, `Job`.
+
+2. **`Session` (Stateful Authenticated Sessions)**
+   - `id`: `String` (CUID, Primary Key)
+   - `userId`: `String` (Foreign key -> `User.id`, `ON DELETE CASCADE`)
+   - `sessionTokenHash`: `String` (Unique SHA-256 hash of the 32-byte raw cookie token)
+   - `createdAt`: `DateTime` (Default `now()`)
+   - `lastActivityAt`: `DateTime` (Touched on every authenticated request for idle timeout)
+   - `expiresAt`: `DateTime` (Hard absolute session ceiling, 24 hours from creation)
+   - `invalidatedAt`: `DateTime?` (Timestamp when user signed out; non-null indicates revoked session)
+
+3. **`VerificationCode` (Email Verification OTP)**
+   - `id`: `String` (CUID, Primary Key)
+   - `userId`: `String` (Foreign key -> `User.id`, `ON DELETE CASCADE`)
+   - `codeHash`: `String` (bcrypt hash of the 6-digit numeric OTP)
+   - `expiresAt`: `DateTime` (60-second database-enforced TTL)
+   - `consumedAt`: `DateTime?` (Legacy soft-mark; rows are deleted on consumption)
+   - `resendCooldownUntil`: `DateTime` (60-second server-enforced cooldown before a new code can be issued)
+   - `attemptCount`: `Int` (Default `0`; incremented on wrong guess; lockout at 5)
+   - `createdAt`: `DateTime` (Default `now()`)
+
+4. **`PasswordResetToken` (Password Reset OTP)**
+   - `id`: `String` (CUID, Primary Key)
+   - `userId`: `String` (Foreign key -> `User.id`, `ON DELETE CASCADE`)
+   - `codeHash`: `String` (bcrypt hash of the 6-digit numeric OTP)
+   - `expiresAt`: `DateTime` (10-minute database-enforced TTL)
+   - `usedAt`: `DateTime?` (Legacy soft-mark; rows are deleted on consumption)
+   - `resendCooldownUntil`: `DateTime` (60-second server-enforced cooldown)
+   - `attemptCount`: `Int` (Default `0`; incremented on wrong guess; lockout at 5)
+   - `createdAt`: `DateTime` (Default `now()`)
+
+5. **`RateLimitAttempt` (Auth Brute-Force Lockout Tracker)**
+   - `id`: `String` (CUID, Primary Key)
+   - `identifier`: `String` (Email address or client IP address)
+   - `route`: `String` (Route key: `signin`, `signup`, `forgot-password`, `resend`)
+   - `attemptCount`: `Int` (Default `1`; failed attempt counter)
+   - `lockedUntil`: `DateTime?` (Lockout timestamp; exponential backoff `2^(n-3)` min, capped at 60 min)
+   - `windowStart`: `DateTime` (Sliding baseline; resets after 2 hours of inactivity)
+   - `updatedAt`: `DateTime` (Last updated timestamp)
+
+---
+
+#### AI Pipeline Table Block
+
+6. **`Job` (Asynchronous AI Unit of Work)**
+   - `id`: `String` (CUID, Primary Key)
+   - `userId`: `String` (Foreign key -> `User.id`, `ON DELETE CASCADE`)
+   - `status`: `String` (`pending` | `processing` | `done` | `failed`)
+   - `attempts`: `Int` (Execution attempts, default `0`, capped at 3)
+   - `errorMessage`: `String?` (User-safe error explanation populated on permanent failure)
+   - `storageKey`: `String` (Opaque R2 storage key `uploads/<userId>/<uuid>.<ext>`, never the file binary)
+   - `originalFileName`: `String` (Original filename)
+   - `fileSize`: `Int` (File size in bytes, max 5,242,880)
+   - `mimeType`: `String` (`image/jpeg` or `image/png`)
+   - `rawModelOutput`: `Json?` (Complete Gemini JSON response payload retained for audit/debugging)
+   - `result`: `Json?` (Validated, schema-conformant extraction JSON: title, description, category, tags)
+   - `expandedResult`: `String?` (Long natural-language listing generated by the follow-up Expand action)
+   - `createdAt`: `DateTime` (Default `now()`)
+   - `updatedAt`: `DateTime` (Automatic timestamp on update)
+
+7. **`ApiRequestLog` (Sliding Window AI Rate Limiting)**
+   - `id`: `String` (CUID, Primary Key)
+   - `userId`: `String` (User identifier for per-user rate limit isolation)
+   - `route`: `String` (`upload` | `expand`)
+   - `createdAt`: `DateTime` (Timestamp of accepted request, default `now()`)
+
+---
+
+### Database-Level Check Constraints, Keys & Referential Actions
+
+PostgreSQL and Prisma enforce relational integrity and performance indexing via the following table constraints and indexes:
+
+| Table | Constraint / Index Name | Type | Target / Definition | Purpose |
+|---|---|---|---|---|
+| `User` | `User_pkey` | Primary Key | `PRIMARY KEY ("id")` | Entity identity |
+| `User` | `User_email_key` | Unique Constraint | `UNIQUE ("email")` | DB-level duplicate account prevention |
+| `Session` | `Session_pkey` | Primary Key | `PRIMARY KEY ("id")` | Entity identity |
+| `Session` | `Session_sessionTokenHash_key` | Unique Constraint | `UNIQUE ("sessionTokenHash")` | Prevents token collision / session takeover |
+| `Session` | `Session_userId_fkey` | Foreign Key | `FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE` | Automatic cascade on user account deletion |
+| `Session` | `Session_userId_idx` | B-Tree Index | `("userId")` | Fast session lookup per user |
+| `VerificationCode` | `VerificationCode_pkey` | Primary Key | `PRIMARY KEY ("id")` | Entity identity |
+| `VerificationCode` | `VerificationCode_userId_fkey` | Foreign Key | `FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE` | Automatic cascade on user account deletion |
+| `VerificationCode` | `VerificationCode_userId_idx` | B-Tree Index | `("userId")` | Fast pending code lookup |
+| `PasswordResetToken`| `PasswordResetToken_pkey` | Primary Key | `PRIMARY KEY ("id")` | Entity identity |
+| `PasswordResetToken`| `PasswordResetToken_userId_fkey` | Foreign Key | `FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE` | Automatic cascade on user account deletion |
+| `PasswordResetToken`| `PasswordResetToken_userId_idx` | B-Tree Index | `("userId")` | Fast reset token query |
+| `RateLimitAttempt` | `RateLimitAttempt_pkey` | Primary Key | `PRIMARY KEY ("id")` | Entity identity |
+| `RateLimitAttempt` | `RateLimitAttempt_identifier_route_key` | Unique Constraint | `UNIQUE ("identifier", "route")` | Atomic upsert target for auth failure counters |
+| `Job` | `Job_pkey` | Primary Key | `PRIMARY KEY ("id")` | Entity identity |
+| `Job` | `Job_userId_fkey` | Foreign Key | `FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE` | Automatic cascade on user account deletion |
+| `Job` | `Job_userId_idx` | B-Tree Index | `("userId")` | Fast job list scoping per user |
+| `Job` | `Job_status_idx` | B-Tree Index | `("status")` | Fast worker query & startup recovery sweep |
+| `ApiRequestLog` | `ApiRequestLog_pkey` | Primary Key | `PRIMARY KEY ("id")` | Entity identity |
+| `ApiRequestLog` | `ApiRequestLog_userId_route_createdAt_idx` | Compound Index | `("userId", "route", "createdAt")` | High-speed sliding-window counting |
+| `ApiRequestLog` | `ApiRequestLog_createdAt_idx` | B-Tree Index | `("createdAt")` | High-speed hourly sweeper cleanup |
+
+---
+
+### Application-Level Check Constraints & Security Invariants
+
+In addition to relational database constraints, strict integrity invariants are enforced across application handlers and workers:
+
+1. **Job Status State Machine Invariant**:
+   - `status` is strictly restricted to `'pending' | 'processing' | 'done' | 'failed'`.
+   - Transitions are atomic: worker claims a job via `prisma.job.updateMany({ where: { id, status: 'pending' }, data: { status: 'processing' } })`. If `count === 0`, duplicate worker execution is impossible.
+
+2. **File Size & Batch Constraints**:
+   - Single file size ceiling: `fileSize <= 5,242,880` bytes (5 MB). Enforced both in browser client and in `POST /api/jobs/upload`.
+   - Batch count ceiling: `files.length <= 10` files per upload payload.
+   - Non-empty check: `fileSize > 0` bytes (0-byte empty files are rejected).
+
+3. **MIME Type & Binary Magic-Byte Constraints**:
+   - MIME allow-list: Strictly `'image/jpeg'` or `'image/png'`.
+   - Magic-byte binary verification ([`src/app/api/jobs/upload/route.ts`](src/app/api/jobs/upload/route.ts)):
+     - JPEG: First 3 bytes must match `0xFF 0xD8 0xFF`.
+     - PNG: First 8 bytes must match `0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A`.
+     - Renamed or spoofed file extensions are rejected immediately before touching Cloudflare R2.
+
+4. **OTP Attempt & Lockout Invariants**:
+   - Maximum attempt ceiling: `attemptCount < 5`. On the 5th failed guess, the code is locked out (`429 Too Many Requests`).
+   - Atomic reservation: `updateMany` increments `attemptCount` *before* running `bcrypt.compare` to prevent parallel timing race attacks.
+   - Resend cooldown constraint: `now() >= resendCooldownUntil`. Re-requesting codes before the 60-second window expires returns `429` with `Retry-After`.
+   - Expiration constraint: `now() <= expiresAt`. Verification codes expire in 60 seconds; reset codes expire in 10 minutes.
+
+5. **Session Lifecycle Invariants**:
+   - Idle timeout constraint: `now() - lastActivityAt < 30 * 60 * 1000` (30 minutes).
+   - Absolute timeout constraint: `now() < expiresAt` (24 hours maximum lifespan).
+   - Explicit invalidation: `invalidatedAt IS NULL`. Sign-out marks `invalidatedAt = now()`.
+
+6. **Sliding Window AI Rate Limiting Invariants**:
+   - Upload ceiling: Max 10 upload requests per 10-minute rolling window per user.
+   - Expand ceiling: Max 20 expand requests per 10-minute rolling window per user.
+   - Emits standard RFC 6585 response headers (`Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`).
+
+---
+
+## 8. API Reference
 
 All responses share the shape:
 
@@ -253,7 +493,7 @@ directly; concurrent calls for the same job return `409`.
 
 ---
 
-## 8. AI Pipeline
+## 9. AI Pipeline
 
 Provider: Gemini via the official `@google/genai` SDK. **One model, two system
 prompts.** All tunable values live in
@@ -309,7 +549,7 @@ prompts.** All tunable values live in
 
 ---
 
-## 9. Background Job Queue & Recovery
+## 10. Background Job Queue & Recovery
 
 - [`src/lib/jobs/queue.ts`](src/lib/jobs/queue.ts) uses `p-limit` with
   `MAX_CONCURRENT_JOBS = 2`, cached on `globalThis` so a single limiter spans the
@@ -321,13 +561,13 @@ prompts.** All tunable values live in
 - **Startup recovery** ([`src/instrumentation.ts`](src/instrumentation.ts)): on
   boot it resets orphaned `processing` rows back to `pending` and re-enqueues all
   pending jobs. The same file registers an hourly sweep of expired, never-used
-  password-reset tokens.
+  password-reset tokens and expired API request logs.
 - Caveat: the in-memory queue does not survive serverless runtimes; startup
   recovery only runs on the Node.js runtime.
 
 ---
 
-## 10. Security Controls
+## 11. Security Controls
 
 | Area | Implementation |
 |---|---|
@@ -338,7 +578,7 @@ prompts.** All tunable values live in
 | Code & token expiry | Verification codes live 60 seconds (`VERIFICATION_CODE_TTL_MS`); password reset tokens live 10 minutes (`RESET_CODE_TTL_MS`), centralized in `src/lib/auth-config.ts`. Single hourly sweeper removes expired rows for both tables. |
 | Attempt reservation | Atomic increment-before-compare (`updateMany` with attempt cap & future expiry check) prevents parallel guess racing before running `compareCode`. |
 | CSRF | Double-submit cookie: non-HttpOnly `csrf_token` cookie + `x-csrf-token` header, compared constant-time. |
-| Rate limiting | DB-backed, per `(identifier, route)`. Exponential backoff after 2 free failures: `2^(n-3)` min, capped at 60 min. Applied to signin, signup, forgot-password, resend, upload, expand. |
+| Rate limiting | **Auth endpoints:** DB-backed exponential backoff lockout after 2 free failures: `2^(n-3)` min, capped at 60 min (signin, signup, forgot-password, resend).<br>**AI endpoints:** DB-backed sliding window counter (`ApiRequestLog`) enforcing 10 req/10 min for upload and 20 req/10 min for expand, emitting RFC 6585 headers (`Retry-After`, `X-RateLimit-*`). |
 | Enumeration | Sign-in, signup, forgot-password, and reset flows return uniform responses; verification/reset codes are hashed and rate-limited. |
 | Upload validation | MIME allow-list (`image/jpeg`, `image/png`), size cap (5 MB), count cap (10), and **magic-byte signature checks** before storage. |
 | Storage | Randomized opaque R2 keys; only the key is persisted. Orphaned objects are deleted if the DB insert fails. |
@@ -361,7 +601,7 @@ prompts.** All tunable values live in
 
 ---
 
-## 11. Frontend Routes
+## 12. Frontend Routes
 
 | Route | Access | Description |
 |---|---|---|
@@ -383,7 +623,7 @@ header automatically.
 
 ---
 
-## 12. Verifying the Build
+## 13. Verifying the Build
 
 ```bash
 npx tsc --noEmit   # type check
@@ -405,7 +645,7 @@ Manual end-to-end check:
 
 ---
 
-## 13. Notes & Conventions
+## 14. Notes & Conventions
 
 - Config values are centralized in `src/lib/ai/config.ts`; nothing tunable is
   hardcoded in route handlers.
