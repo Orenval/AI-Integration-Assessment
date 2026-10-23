@@ -1,7 +1,8 @@
 // =============================================================================
-// Prisma Schema — Auth Assessment
+// Prisma Schema — AI Integration Assessment
 // =============================================================================
-// This schema defines the complete data model for the authentication system.
+// This schema defines the data model for the AI Integration system,
+// including user authentication, session security, AI processing jobs, and rate limiting.
 // All security-critical fields are documented inline.
 
 generator client {

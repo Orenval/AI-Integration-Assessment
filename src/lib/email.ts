@@ -39,7 +39,7 @@ const transporter = nodemailer.createTransport({
   socketTimeout: 10000,
 });
 
-const FROM_ADDRESS = process.env.SMTP_FROM || "Auth Assessment <noreply@localhost>";
+const FROM_ADDRESS = process.env.SMTP_FROM || "AI Integration Assessment <noreply@localhost>";
 
 // Community invite for the signup welcome email.
 const WELCOME_DISCORD_URL = "https://discord.gg/R7hAMztYU";
