@@ -74,6 +74,17 @@ export function UploadView({ user }: UploadViewProps) {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [previewUrls, setPreviewUrls] = useState<{ key: string; name: string; url: string }[]>([]);
   const [isListingsExpanded, setIsListingsExpanded] = useState(false);
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
+  const [deletingJobIds, setDeletingJobIds] = useState<Set<string>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    jobIds: string[];
+    title?: string;
+  } | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isPollingRef = useRef(false);
@@ -133,6 +144,114 @@ export function UploadView({ user }: UploadViewProps) {
   const COLLAPSED_LISTINGS_LIMIT = 5;
   const visibleJobs = isListingsExpanded ? jobs : jobs.slice(0, COLLAPSED_LISTINGS_LIMIT);
   const hasMoreListings = jobs.length > COLLAPSED_LISTINGS_LIMIT;
+
+  const toggleJobSelection = (id: string) => {
+    setSelectedJobIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allVisible = new Set(visibleJobs.map((j) => j.id));
+      setSelectedJobIds(allVisible);
+    } else {
+      setSelectedJobIds(new Set());
+    }
+  };
+
+  const openDeleteConfirm = (jobIds: string[], title?: string) => {
+    setDeleteConfirm({
+      isOpen: true,
+      jobIds,
+      title,
+    });
+  };
+
+  const closeDeleteConfirm = () => {
+    if (deletingJobIds.size > 0) return;
+    setDeleteConfirm(null);
+  };
+
+  const executeDelete = async () => {
+    if (!deleteConfirm || deleteConfirm.jobIds.length === 0) return;
+
+    const idsToDelete = [...deleteConfirm.jobIds];
+    setDeletingJobIds(new Set(idsToDelete));
+    setActionFeedback(null);
+
+    try {
+      const csrfToken = await ensureCsrfToken();
+      let res: Response;
+
+      if (idsToDelete.length === 1) {
+        res = await fetch(`/api/jobs/${idsToDelete[0]}`, {
+          method: 'DELETE',
+          headers: {
+            Accept: 'application/json',
+            ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+          },
+        });
+      } else {
+        res = await fetch('/api/jobs', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+          },
+          body: JSON.stringify({ ids: idsToDelete }),
+        });
+      }
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setJobs((prev) => prev.filter((j) => !idsToDelete.includes(j.id)));
+        setSelectedJobIds((prev) => {
+          const next = new Set(prev);
+          for (const id of idsToDelete) {
+            next.delete(id);
+          }
+          return next;
+        });
+        setActionFeedback({
+          type: 'success',
+          text: data.message || 'Listing removed successfully',
+        });
+        setDeleteConfirm(null);
+      } else {
+        setActionFeedback({
+          type: 'error',
+          text: data.message || 'Could not remove listing. Please try again.',
+        });
+      }
+    } catch {
+      setActionFeedback({
+        type: 'error',
+        text: 'Network error. Could not remove listing.',
+      });
+    } finally {
+      setDeletingJobIds(new Set());
+    }
+  };
+
+  // Automatically dismiss action feedback snackbar after 3 seconds
+  useEffect(() => {
+    if (!actionFeedback) return;
+
+    const timer = setTimeout(() => {
+      setActionFeedback(null);
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [actionFeedback]);
 
   useEffect(() => {
     if (!hasActiveJobs) return;
@@ -668,7 +787,7 @@ export function UploadView({ user }: UploadViewProps) {
             padding: '28px',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
@@ -699,24 +818,108 @@ export function UploadView({ user }: UploadViewProps) {
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => void fetchJobs()}
-              disabled={isRefreshing}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {selectedJobIds.size > 0 && (
+                <button
+                  id="remove-selected-listings-btn"
+                  type="button"
+                  onClick={() => openDeleteConfirm(Array.from(selectedJobIds))}
+                  disabled={deletingJobIds.size > 0}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 14px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#dc2626',
+                    backgroundColor: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: '6px',
+                    cursor: deletingJobIds.size > 0 ? 'not-allowed' : 'pointer',
+                    transition: 'background-color 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fee2e2';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fef2f2';
+                  }}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                  </svg>
+                  Remove selected ({selectedJobIds.size})
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void fetchJobs()}
+                disabled={isRefreshing}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: '#475569',
+                  backgroundColor: '#f1f5f9',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  cursor: isRefreshing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isRefreshing ? 'Refreshing...' : 'Update status'}
+              </button>
+            </div>
+          </div>
+
+          {actionFeedback && (
+            <div
+              role="status"
               style={{
-                padding: '6px 14px',
-                fontSize: '13px',
-                fontWeight: 500,
-                color: '#475569',
-                backgroundColor: '#f1f5f9',
-                border: '1px solid #cbd5e1',
-                borderRadius: '6px',
-                cursor: isRefreshing ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                marginBottom: '16px',
+                borderRadius: '8px',
+                fontSize: '13.5px',
+                backgroundColor: actionFeedback.type === 'success' ? '#ecfdf5' : '#fef2f2',
+                border: `1px solid ${actionFeedback.type === 'success' ? '#a7f3d0' : '#fecaca'}`,
+                color: actionFeedback.type === 'success' ? '#065f46' : '#991b1b',
               }}
             >
-              {isRefreshing ? 'Refreshing...' : 'Update status'}
-            </button>
-          </div>
+              <span>{actionFeedback.text}</span>
+              <button
+                type="button"
+                onClick={() => setActionFeedback(null)}
+                aria-label="Dismiss message"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  padding: '0 4px',
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {fetchError && (
             <div style={{ padding: '10px 14px', backgroundColor: '#fef2f2', color: '#991b1b', borderRadius: '6px', fontSize: '13px', marginBottom: '16px' }}>
@@ -753,24 +956,47 @@ export function UploadView({ user }: UploadViewProps) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Photo</th>
-                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
-                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Tries</th>
-                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Result</th>
+                    <th style={{ width: '38px', padding: '12px 12px 12px 16px' }} />
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Photo</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Tries</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Result</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleJobs.map((job) => {
+                    const isSelected = selectedJobIds.has(job.id);
+                    const isDeletingThis = deletingJobIds.has(job.id);
+
                     return (
                       <tr
                         key={job.id}
                         style={{
                           borderBottom: '1px solid #f1f5f9',
+                          backgroundColor: isSelected ? '#f8fafc' : 'transparent',
                           transition: 'background-color 0.1s ease',
+                          opacity: isDeletingThis ? 0.45 : 1,
                         }}
                       >
+                        {/* Row Selection Checkbox */}
+                        <td style={{ padding: '14px 12px 14px 16px', verticalAlign: 'middle' }}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select listing for ${job.originalFileName}`}
+                            checked={isSelected}
+                            onChange={() => toggleJobSelection(job.id)}
+                            style={{
+                              width: '16px',
+                              height: '16px',
+                              accentColor: '#2563eb',
+                              cursor: 'pointer',
+                            }}
+                          />
+                        </td>
+
                         {/* File Name */}
-                        <td style={{ padding: '14px 16px', verticalAlign: 'top' }}>
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
                           <div style={{ fontWeight: 500, color: '#1e293b' }}>
                             {job.originalFileName}
                           </div>
@@ -782,7 +1008,7 @@ export function UploadView({ user }: UploadViewProps) {
                         </td>
 
                         {/* Status Badge */}
-                        <td style={{ padding: '14px 16px', verticalAlign: 'top' }}>
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
                           <span
                             style={{
                               display: 'inline-flex',
@@ -793,35 +1019,35 @@ export function UploadView({ user }: UploadViewProps) {
                               fontWeight: 600,
                               textTransform: 'uppercase',
                               letterSpacing: '0.05em',
-                               backgroundColor:
-                                 job.status === 'done'
-                                   ? '#dcfce7'
-                                   : job.status === 'failed'
-                                   ? '#fee2e2'
-                                   : job.status === 'processing'
-                                   ? '#e0e7ff'
-                                   : '#f1f5f9',
-                               color:
-                                 job.status === 'done'
-                                   ? '#166534'
-                                   : job.status === 'failed'
-                                   ? '#b91c1c'
-                                   : job.status === 'processing'
-                                   ? '#4338ca'
-                                   : '#475569',
+                              backgroundColor:
+                                job.status === 'done'
+                                  ? '#dcfce7'
+                                  : job.status === 'failed'
+                                  ? '#fee2e2'
+                                  : job.status === 'processing'
+                                  ? '#e0e7ff'
+                                  : '#f1f5f9',
+                              color:
+                                job.status === 'done'
+                                  ? '#166534'
+                                  : job.status === 'failed'
+                                  ? '#b91c1c'
+                                  : job.status === 'processing'
+                                  ? '#4338ca'
+                                  : '#475569',
                             }}
                           >
-                               {jobStatusLabel(job.status)}
-                             </span>
+                            {jobStatusLabel(job.status)}
+                          </span>
                         </td>
 
                         {/* Attempts */}
-                        <td style={{ padding: '14px 16px', verticalAlign: 'top', color: '#64748b', fontSize: '13px' }}>
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', color: '#64748b', fontSize: '13px' }}>
                           {job.attempts}
                         </td>
 
-                        {/* Action / Error Details */}
-                        <td style={{ padding: '14px 16px', verticalAlign: 'top' }}>
+                        {/* Result / Action details */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
                           {job.status === 'done' && (
                             <Link
                               href={`/jobs/${job.id}`}
@@ -836,24 +1062,79 @@ export function UploadView({ user }: UploadViewProps) {
                                 textDecoration: 'none',
                               }}
                             >
-                               View listing
-                             </Link>
+                              View listing
+                            </Link>
                           )}
 
                           {job.status === 'failed' && (
                             <div style={{ fontSize: '13px', color: '#b91c1c' }}>
                               <div>{job.errorMessage || 'Something went wrong.'}</div>
                               <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>
-                                 Something went wrong. Upload the photo again to retry.
+                                Something went wrong. Upload the photo again to retry.
                               </div>
                             </div>
                           )}
 
                           {(job.status === 'pending' || job.status === 'processing') && (
                             <span style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>
-                               {jobStatusLabel(job.status)}
+                              {jobStatusLabel(job.status)}
                             </span>
                           )}
+                        </td>
+
+                        {/* Individual Remove Button */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            onClick={() => openDeleteConfirm([job.id], job.originalFileName)}
+                            disabled={isDeletingThis || deletingJobIds.size > 0}
+                            aria-label={`Remove listing for ${job.originalFileName}`}
+                            title="Remove listing"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '32px',
+                              height: '32px',
+                              padding: 0,
+                              color: '#64748b',
+                              backgroundColor: 'transparent',
+                              border: '1px solid transparent',
+                              borderRadius: '6px',
+                              cursor: isDeletingThis || deletingJobIds.size > 0 ? 'not-allowed' : 'pointer',
+                              transition: 'color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isDeletingThis && deletingJobIds.size === 0) {
+                                e.currentTarget.style.color = '#dc2626';
+                                e.currentTarget.style.backgroundColor = '#fef2f2';
+                                e.currentTarget.style.borderColor = '#fecaca';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = '#64748b';
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                              e.currentTarget.style.borderColor = 'transparent';
+                            }}
+                          >
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M3 6h18" />
+                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                              <line x1="10" y1="11" x2="10" y2="17" />
+                              <line x1="14" y1="11" x2="14" y2="17" />
+                            </svg>
+                          </button>
                         </td>
                       </tr>
                     );
@@ -941,6 +1222,139 @@ export function UploadView({ user }: UploadViewProps) {
           </>
         )}
         </section>
+
+        {/* Delete Confirmation Modal */}
+        {deleteConfirm && deleteConfirm.isOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-dialog-title"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(15, 23, 42, 0.45)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '16px',
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget && deletingJobIds.size === 0) {
+                closeDeleteConfirm();
+              }
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: '#ffffff',
+                borderRadius: '16px',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                border: '1px solid #e2e8f0',
+                maxWidth: '440px',
+                width: '100%',
+                padding: '24px',
+                position: 'relative',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '16px' }}>
+                <div
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    backgroundColor: '#fee2e2',
+                    color: '#dc2626',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <h3
+                    id="delete-dialog-title"
+                    style={{ fontSize: '18px', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}
+                  >
+                    {deleteConfirm.jobIds.length === 1 ? 'Remove listing?' : `Remove ${deleteConfirm.jobIds.length} listings?`}
+                  </h3>
+                  <p style={{ fontSize: '14px', color: '#64748b', lineHeight: 1.5 }}>
+                    {deleteConfirm.jobIds.length === 1
+                      ? `Are you sure you want to remove the listing for "${deleteConfirm.title || 'this item'}"? The photo and generated data will be permanently deleted.`
+                      : `Are you sure you want to remove the ${deleteConfirm.jobIds.length} selected listings? All photos and generated data will be permanently deleted.`}
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                <button
+                  type="button"
+                  onClick={closeDeleteConfirm}
+                  disabled={deletingJobIds.size > 0}
+                  style={{
+                    padding: '9px 16px',
+                    fontSize: '13.5px',
+                    fontWeight: 500,
+                    color: '#475569',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '8px',
+                    cursor: deletingJobIds.size > 0 ? 'not-allowed' : 'pointer',
+                    transition: 'background-color 0.15s ease',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  id="confirm-remove-listing-btn"
+                  type="button"
+                  onClick={() => void executeDelete()}
+                  disabled={deletingJobIds.size > 0}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '9px 18px',
+                    fontSize: '13.5px',
+                    fontWeight: 600,
+                    color: '#ffffff',
+                    backgroundColor: deletingJobIds.size > 0 ? '#f87171' : '#dc2626',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: deletingJobIds.size > 0 ? 'not-allowed' : 'pointer',
+                    transition: 'background-color 0.15s ease',
+                    boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                  }}
+                >
+                  {deletingJobIds.size > 0
+                    ? 'Removing...'
+                    : deleteConfirm.jobIds.length === 1
+                    ? 'Remove listing'
+                    : `Remove ${deleteConfirm.jobIds.length} listings`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

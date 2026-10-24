@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { DashboardHeader } from '@/app/dashboard/dashboard-header';
 import { JobDetailDto } from '@/lib/ai/types';
 import { ExtractionResult } from '@/lib/ai/schemas';
@@ -38,6 +39,39 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
   const [isExpanding, setIsExpanding] = useState(false);
   const [expandError, setExpandError] = useState<string | null>(null);
   const [expandedText, setExpandedText] = useState<string | null>(null);
+
+  const router = useRouter();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteListing = async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const csrfToken = await ensureCsrfToken();
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'DELETE',
+        headers: {
+          Accept: 'application/json',
+          ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        },
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        router.push('/upload');
+      } else {
+        setDeleteError(data.message || 'Could not remove listing.');
+        setIsDeleting(false);
+      }
+    } catch {
+      setDeleteError('Network error. Could not remove listing.');
+      setIsDeleting(false);
+    }
+  };
 
   const fetchJobStatus = useCallback(async () => {
     try {
@@ -241,21 +275,42 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                 <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '20px' }}>
                    Something went wrong. Upload the photo again to retry.
                 </p>
-                <Link
-                  href="/upload"
-                  style={{
-                    display: 'inline-block',
-                    padding: '8px 18px',
-                    backgroundColor: '#2563eb',
-                    color: '#ffffff',
-                    borderRadius: '6px',
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    textDecoration: 'none',
-                  }}
-                >
-                   Go to upload page
-                </Link>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '12px' }}>
+                  <Link
+                    href="/upload"
+                    style={{
+                      display: 'inline-block',
+                      padding: '8px 18px',
+                      backgroundColor: '#2563eb',
+                      color: '#ffffff',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      textDecoration: 'none',
+                    }}
+                  >
+                     Go to upload page
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteModal(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 16px',
+                      backgroundColor: '#fef2f2',
+                      color: '#dc2626',
+                      border: '1px solid #fecaca',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Remove listing
+                  </button>
+                </div>
               </div>
             ) : (
               <div>
@@ -316,9 +371,43 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
                   </h1>
                 </div>
 
-                <span style={{ fontSize: '13px', color: '#64748b', whiteSpace: 'nowrap' }}>
-                  Source: {job.originalFileName}
-                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                    Source: {job.originalFileName}
+                  </span>
+                  <button
+                    id="remove-listing-btn"
+                    type="button"
+                    onClick={() => setShowDeleteModal(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 12px',
+                      fontSize: '12.5px',
+                      fontWeight: 500,
+                      color: '#dc2626',
+                      backgroundColor: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fee2e2';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fef2f2';
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                    </svg>
+                    Remove listing
+                  </button>
+                </div>
               </div>
 
               {/* Category */}
@@ -454,6 +543,126 @@ export function JobDetailView({ jobId, user }: JobDetailViewProps) {
           </div>
         )}
       </main>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="detail-delete-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.45)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '16px',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeleting) {
+              setShowDeleteModal(false);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              border: '1px solid #e2e8f0',
+              maxWidth: '440px',
+              width: '100%',
+              padding: '24px',
+              position: 'relative',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '16px' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: '#fee2e2',
+                  color: '#dc2626',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <h3
+                  id="detail-delete-title"
+                  style={{ fontSize: '18px', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}
+                >
+                  Remove this listing?
+                </h3>
+                <p style={{ fontSize: '14px', color: '#64748b', lineHeight: 1.5 }}>
+                  Are you sure you want to remove &ldquo;{job?.originalFileName || 'this listing'}&rdquo;? The uploaded photo and extracted data will be permanently deleted.
+                </p>
+                {deleteError && (
+                  <p style={{ fontSize: '13px', color: '#dc2626', marginTop: '10px' }}>
+                    {deleteError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+                style={{
+                  padding: '9px 16px',
+                  fontSize: '13.5px',
+                  fontWeight: 500,
+                  color: '#475569',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                id="confirm-detail-remove-btn"
+                type="button"
+                onClick={() => void handleDeleteListing()}
+                disabled={isDeleting}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '9px 18px',
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                  color: '#ffffff',
+                  backgroundColor: isDeleting ? '#f87171' : '#dc2626',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                }}
+              >
+                {isDeleting ? 'Removing...' : 'Remove listing'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

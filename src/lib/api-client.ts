@@ -72,7 +72,8 @@ export async function apiFetch<T = undefined>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   let csrfToken = getCookie("csrf_token");
-  if (!csrfToken && (options.method === "POST" || !options.method)) {
+  const method = options.method?.toUpperCase() || "POST";
+  if (!csrfToken && (method === "POST" || method === "DELETE" || method === "PUT" || method === "PATCH")) {
     csrfToken = await ensureCsrfToken();
   }
 
